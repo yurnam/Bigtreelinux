@@ -68,3 +68,5 @@ BR2_TARGET_ROOTFS_JFFS2_FLASH_64=y
 
 # ── Packages – BusyBox only ───────────────────────────────────────────────
 BR2_PACKAGE_BUSYBOX=y
+# Force CONFIG_MMU=y so ash compiles (ESP32-S3 has a hardware MMU).
+BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_PANDATOUCH_PATH)/board/pandatouch/busybox-mmu.config"

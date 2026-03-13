@@ -159,7 +159,8 @@ else
     pushd buildroot; git pull; popd
 fi
 
-if [ ! -d "build-buildroot-$BUILDROOT_CONFIG" ] ; then
+if [ ! -d "build-buildroot-$BUILDROOT_CONFIG" ] || \
+   [ ! -f "build-buildroot-$BUILDROOT_CONFIG/images/xipImage" ] ; then
     nice make -C buildroot \
         O="$(pwd)/build-buildroot-$BUILDROOT_CONFIG" \
         BR2_EXTERNAL="$BR2_EXTERNAL_DIR" \

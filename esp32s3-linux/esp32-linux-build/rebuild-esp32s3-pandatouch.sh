@@ -159,6 +159,20 @@ else
     pushd buildroot; git pull; popd
 fi
 
+# ── Patch Buildroot's busybox.mk for Xtensa-MMU targets ──────────────────
+# In the jcmvbkbc xtensa-fdpic fork the BR2_XTENSA_USE_MMU → select
+# BR2_USE_MMU Kconfig chain is broken.  busybox.mk's BUSYBOX_KCONFIG_FIXUP_CMDS
+# evaluates $(BR2_USE_MMU) which is empty after syncconfig, so it calls
+# KCONFIG_DISABLE_OPT,CONFIG_MMU *after* any config fragment — overriding
+# CONFIG_MMU=y and causing ash to fail with the NOMMU compile error.
+# This sed patch makes the fixup also accept $(BR2_XTENSA_USE_MMU) (a valid
+# Kconfig symbol that survives syncconfig) as proof of a hardware MMU.
+if ! grep -q 'BR2_XTENSA_USE_MMU' buildroot/package/busybox/busybox.mk 2>/dev/null; then
+    sed -i 's#\$(if \$(BR2_USE_MMU),,#$(if $(or $(BR2_USE_MMU),$(BR2_XTENSA_USE_MMU)),,#' \
+        buildroot/package/busybox/busybox.mk \
+        || die "Failed to patch buildroot/package/busybox/busybox.mk"
+fi
+
 if [ ! -d "build-buildroot-$BUILDROOT_CONFIG" ] || \
    [ ! -f "build-buildroot-$BUILDROOT_CONFIG/images/xipImage" ] ; then
     nice make -C buildroot \

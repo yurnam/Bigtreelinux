@@ -289,9 +289,7 @@ run_docker_build() {
     fi
 
     docker_args+=("$DOCKER_IMAGE")
-    # Run the full rebuild script with the minimal+fb config
-    docker_args+=("./esp32-linux-build/rebuild-esp32s3-pandatouch.sh")
-    docker_args+=("-c" "/app/pandatouch-fb.conf")
+    docker_args+=("./esp32-linux-build/rebuild-esp32s3-pandatouch-fb.sh")
 
     if [[ "$NO_FLASH" -eq 1 ]]; then
         docker_args+=("--no-flash")

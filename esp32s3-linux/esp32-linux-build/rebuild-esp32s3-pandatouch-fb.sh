@@ -1,35 +1,42 @@
 #! /bin/bash -x
 #
-# rebuild-esp32s3-pandatouch-minimal.sh
-# ──────────────────────────────────────
-# MINIMAL build + flash script for BigTreeTech PandaTouch (ESP32-S3).
+# rebuild-esp32s3-pandatouch-fb.sh
+# ─────────────────────────────────
+# Build and flash the framebuffer Linux image for the BigTreeTech PandaTouch.
 #
-# Produces the smallest image that gets Linux booting on the device:
-#   • Serial console (ttyS0, 115200 baud, via USB-C → CH340K)
-#   • BusyBox shell + standard utilities
-#   • Writable /etc (jffs2)
+# What you get
+# ────────────
+# • LCD framebuffer (/dev/fb0) via simple-framebuffer DT node
+# • fbcon – kernel text console rendered on the LCD
+# • fbset  – userspace tool to inspect / set display modes
+# • BusyBox init + shell + standard utilities
+# • Serial console (UART0, ttyS0, 115200 baud, via USB-C → CH340K)
+# • Writable /etc (jffs2)
 #
-# What is SKIPPED vs the full rebuild-esp32s3-pandatouch.sh:
-#   • Framebuffer / LCD display drivers   (no /dev/fb0)
-#   • Goodix GT911 touch driver           (no touch input)
-#   • USB host / mass-storage drivers     (no USB thumb-drive root)
-#   • WiFi (wpa_supplicant)
-#   • Userspace tools: iproute2, tslib, evtest, devmem2, mtd-utils, usbutils
+# What is SKIPPED vs the full rebuild-esp32s3-pandatouch.sh
+# ──────────────────────────────────────────────────────────
+# • WiFi (wpa_supplicant)                   – no wireless networking
+# • Touchscreen userspace (tslib, evtest)   – kernel GT911 driver is present
+#                                             but no calibration tools
+# • Network tools (iproute2)
+# • Flash tools (mtd-utils)
+# • USB utilities (usbutils)
+# • MMIO debug tool (devmem2)
 #
-# Expected build time (first run, everything from scratch):
-#   ≈ 35–45 minutes  (vs ≈ 60–75 minutes for the full build)
-#   The toolchain and esp-hosted take a fixed ≈ 30 min regardless.
-#   The minimal Buildroot step takes ≈ 8–12 min (vs ≈ 25–35 min full).
+# Build time
+# ──────────
+# First run: ~60 min (toolchain + Buildroot + esp-hosted all built from scratch)
+# Subsequent runs: ~5–10 min (incremental; only changed parts rebuild)
 #
 # Designed to run:
 #   a) Inside the Docker container (esp32linuxbase) with esp32s3-linux/ as /app
 #   b) Natively on a host with the packages in esp32-linux-build/README
 #
-# Usage (inside Docker or natively, from esp32s3-linux/):
-#   ./esp32-linux-build/rebuild-esp32s3-pandatouch-minimal.sh [OPTIONS]
+# Usage (from esp32s3-linux/):
+#   ./esp32-linux-build/rebuild-esp32s3-pandatouch-fb.sh [OPTIONS]
 #
 # Options:
-#   -c <file>    Override board config (default: ../pandatouch-minimal.conf)
+#   -c <file>    Override board config (default: ../pandatouch-fb.conf)
 #   --no-flash   Build images only, skip all flashing steps
 #
 # Environment variables:
@@ -37,14 +44,8 @@
 #   keep_rootfs=y      skip rootfs rebuild
 #   keep_buildroot=y   skip buildroot re-download
 #   keep_bootloader=y  skip esp-hosted re-download
+#   keep_etc=y         skip reflashing /etc partition
 #   ESP_PORT=<dev>     serial port (e.g. /dev/ttyUSB0); auto-detected if unset
-#
-# After flashing, connect a serial terminal at 115200 baud to the USB-C port:
-#   screen /dev/ttyUSB0 115200
-#   minicom -D /dev/ttyUSB0 -b 115200
-#
-# To upgrade to the full image later, run rebuild-esp32s3-pandatouch.sh
-# with keep_toolchain=y keep_bootloader=y to reuse built artefacts.
 
 SET_BAUDRATE='-b 2000000'
 
@@ -57,7 +58,7 @@ ESP_HOSTED_VER=ipc-5.1.1
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LINUX_DIR="$(realpath "$SCRIPT_DIR/..")"
 
-PANDATOUCH_CONF="$LINUX_DIR/pandatouch-minimal.conf"
+PANDATOUCH_CONF="$LINUX_DIR/pandatouch-fb.conf"
 BR2_EXTERNAL_DIR="$LINUX_DIR/br2-external"
 PARTITIONS_CSV="$LINUX_DIR/lcd-init/partitions.csv"
 SDKCONFIG_DEFAULTS="$SCRIPT_DIR/sdkconfig.pandatouch.defaults"
@@ -96,15 +97,15 @@ done
 
 [ -n "$BUILDROOT_CONFIG" ] || die "BUILDROOT_CONFIG not set in $conf"
 
-echo "=== PandaTouch Linux MINIMAL build ==="
+echo "=== PandaTouch Linux framebuffer build ==="
 echo "    BUILDROOT_CONFIG  = $BUILDROOT_CONFIG"
 echo "    BR2_EXTERNAL      = $BR2_EXTERNAL_DIR"
 echo "    partitions.csv    = $PARTITIONS_CSV"
 echo "    NO_FLASH          = $NO_FLASH"
 [ -n "${ESP_PORT:-}" ] && echo "    ESP_PORT          = $ESP_PORT"
 echo ""
-echo "    This build skips WiFi, framebuffer, touch and USB drivers."
-echo "    You will get a serial-console-only BusyBox Linux."
+echo "    This build includes framebuffer LCD support and fbset."
+echo "    WiFi, touch userspace, and heavy networking tools are skipped."
 echo ""
 
 # ── Autoconf 2.71 ─────────────────────────────────────────────────────────
@@ -151,7 +152,7 @@ if [ ! -x "crosstool-NG/builds/$CTNG_CONFIG/bin/$CTNG_CONFIG-gcc" ] ; then
     [ -x "crosstool-NG/builds/$CTNG_CONFIG/bin/$CTNG_CONFIG-gcc" ] || exit 1
 fi
 
-# ── Buildroot (kernel + minimal rootfs) ───────────────────────────────────
+# ── Buildroot (kernel + framebuffer rootfs) ───────────────────────────────
 if [ ! -d buildroot ] ; then
     git clone https://github.com/jcmvbkbc/buildroot -b "$BUILDROOT_VER"
 else
@@ -194,10 +195,9 @@ if [ ! -d "build-buildroot-$BUILDROOT_CONFIG" ] || \
         '$(ARCH)-esp32s3-linux-uclibcfdpic'
 
     # Force BusyBox reconfigure: .stamp_configured may exist from a previous
-    # failed build where CONFIG_MMU was disabled.  Buildroot's
-    # BUSYBOX_CONFIG_FIXUPS (which enables CONFIG_MMU when BR2_USE_MMU=y) only
-    # runs during the configure step.  Deleting these stamps ensures the
-    # configure step is not skipped on the next incremental build.
+    # failed build where CONFIG_MMU was disabled.  Deleting these stamps
+    # ensures Buildroot re-runs the configure step (including KCONFIG_FIXUP_CMDS)
+    # on the next incremental build so CONFIG_MMU=y is properly applied.
     rm -f "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_configured \
           "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_built
 fi
@@ -206,9 +206,9 @@ nice make -C buildroot \
     O="$(pwd)/build-buildroot-$BUILDROOT_CONFIG" \
     BR2_EXTERNAL="$BR2_EXTERNAL_DIR"
 
-[ -f "build-buildroot-$BUILDROOT_CONFIG/images/xipImage"      ] || exit 1
-[ -f "build-buildroot-$BUILDROOT_CONFIG/images/rootfs.cramfs"  ] || exit 1
-[ -f "build-buildroot-$BUILDROOT_CONFIG/images/etc.jffs2"      ] || exit 1
+[ -f "build-buildroot-$BUILDROOT_CONFIG/images/xipImage"     ] || exit 1
+[ -f "build-buildroot-$BUILDROOT_CONFIG/images/rootfs.cramfs" ] || exit 1
+[ -f "build-buildroot-$BUILDROOT_CONFIG/images/etc.jffs2"     ] || exit 1
 
 # ── esp-hosted: WiFi co-processor + Linux loader ──────────────────────────
 [ -d esp-hosted ] || git clone \
@@ -245,28 +245,26 @@ if [ "$NO_FLASH" -eq 0 ] ; then
         --partition-name rootfs \
         --input "build-buildroot-$BUILDROOT_CONFIG/images/rootfs.cramfs"
 
-    parttool.py "${PORT_ARGS[@]}" $SET_BAUDRATE write_partition \
-        --partition-name etc \
-        --input "build-buildroot-$BUILDROOT_CONFIG/images/etc.jffs2"
+    if [ -z "${keep_etc:-}" ] ; then
+        read -p 'Ready to flash /etc... press Enter'
+        parttool.py "${PORT_ARGS[@]}" $SET_BAUDRATE write_partition \
+            --partition-name etc \
+            --input "build-buildroot-$BUILDROOT_CONFIG/images/etc.jffs2"
+    fi
 
     echo ""
-    echo "=== PandaTouch minimal flash complete! ==="
+    echo "=== PandaTouch framebuffer flash complete! ==="
     echo ""
-    echo "Connect a serial terminal at 115200 baud to the USB-C port:"
-    echo "  screen /dev/ttyUSB0 115200"
-    echo "  minicom -D /dev/ttyUSB0 -b 115200"
+    echo "Power-cycle the board and connect a serial terminal at 115200 baud."
+    echo "(USB-C port → CH340K UART bridge → ttyUSB0 or ttyACM0)"
     echo ""
-    echo "Power-cycle the board to boot Linux."
-    echo ""
-    echo "To upgrade to the full image (WiFi, display, touch) later, run:"
-    echo "  keep_toolchain=y keep_bootloader=y \\"
-    echo "    ./esp32-linux-build/rebuild-esp32s3-pandatouch.sh"
+    echo "The LCD should display the Linux console (fbcon) on boot."
 else
     echo ""
-    echo "=== PandaTouch minimal build complete (--no-flash) ==="
+    echo "=== PandaTouch framebuffer build complete (--no-flash) ==="
     echo "Built images in: build/build-buildroot-$BUILDROOT_CONFIG/images/"
-    echo "  xipImage       Linux kernel (XIP)"
-    echo "  rootfs.cramfs  cramfs root filesystem (BusyBox only)"
+    echo "  xipImage       Linux kernel (XIP, with framebuffer + fbcon)"
+    echo "  rootfs.cramfs  cramfs root filesystem (BusyBox + fbset)"
     echo "  etc.jffs2      writable /etc partition"
     echo "esp-hosted binary: build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/build/"
 fi

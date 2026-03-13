@@ -1,45 +1,46 @@
 #!/usr/bin/env bash
-# build.sh – Build and flash Linux on the BigTreeTech PandaTouch
+# build-minimal.sh – Incremental minimal build + flash for BigTreeTech PandaTouch
 #
 # Run this script from the repository root:
-#   ./build.sh
-#   ./build.sh -p /dev/ttyUSB0
-#   ./build.sh --no-flash
-#   ./build.sh --skip-build -p /dev/ttyACM0
+#   ./build-minimal.sh
+#   ./build-minimal.sh -p /dev/ttyUSB0
+#   ./build-minimal.sh --no-flash
+#   ./build-minimal.sh --clean        # force full rebuild from scratch
 #
-# What it does
-# ────────────
-# 1. Checks prerequisites (Docker, Python/esptool).
-# 2. Auto-detects the serial port if -p is not given.
-# 3. Builds the Docker image (esp32linuxbase) if not already present.
-# 4. Creates settings.cfg if it does not exist.
-# 5. Runs rebuild-esp32s3-pandatouch.sh inside Docker, which:
-#      a. Builds the Xtensa cross-compiler (crosstool-NG)
-#      b. Builds the Linux kernel + cramfs rootfs + jffs2 /etc (Buildroot)
-#      c. Builds the esp-hosted Linux-loader firmware (ESP-IDF)
-#         with the OPI PSRAM fix for PandaTouch
-#      d. Flashes everything to the device
+# What this builds (minimal + framebuffer)
+# ─────────────────────────────────────────
+# • Linux kernel with framebuffer (simple-fb, fbcon) + GT911 touch driver
+# • LCD display initialised via /etc/init.d/S10display
+# • BusyBox init + shell + fbset
+# • Serial console (UART0, ttyS0, 115200 baud)
+# • Writable /etc (jffs2)
 #
-# Serial port
-# ────────────
-# Connect the PandaTouch USB-C port to the build host.
-# The CH340K USB-UART bridge presents as /dev/ttyUSB0 or /dev/ttyACM0.
-# Use -p to specify the port if auto-detection fails.
+# What is SKIPPED vs the full build.sh:
+# • WiFi (wpa_supplicant)
+# • Touchscreen userspace (tslib, evtest)
+# • Network tools (iproute2)
+# • Flash tools (mtd-utils)
+# • USB utilities (usbutils)
+# • MMIO debug tool (devmem2)
 #
-# Build time / disk
-# ─────────────────
-# First build: ~35-45 min, ~20 GB disk space (inside the Docker volume).
-# Subsequent builds with keep_* flags: ~5-10 min.
+# Incremental by default
+# ──────────────────────
+# On first run everything is built from scratch (~60 min).
+# On subsequent runs only the kernel/rootfs are rebuilt if files changed.
+# The toolchain (crosstool-NG), Buildroot download, and esp-hosted are all
+# reused automatically – no need to set keep_* flags manually.
+# Use --clean to force a full rebuild from scratch.
 #
 # Options
 # ───────
-#   -p, --port PORT     Serial port    (default: auto-detect)
-#   -b, --baud BAUD     Baud rate      (default: 2000000)
-#   --no-flash          Build images only, do not flash the device
-#   --skip-build        Flash pre-built images only (skip Docker build)
-#   --docker-image IMG  Docker image name  (default: esp32linuxbase)
-#   --rebuild-docker    Force rebuild of Docker image even if it exists
-#   -h, --help          Show this help and exit
+#   -p, --port  PORT        Serial port  (default: auto-detect)
+#   -b, --baud  BAUD        Baud rate    (default: 2000000)
+#   --no-flash              Build images only; do not flash the device
+#   --skip-build            Flash pre-built images only (skip Docker build)
+#   --clean                 Delete all build artefacts and rebuild from scratch
+#   --docker-image  NAME    Docker image name (default: esp32linuxbase)
+#   --rebuild-docker        Force rebuild of Docker image
+#   -h, --help              Show this help
 
 set -euo pipefail
 
@@ -53,44 +54,51 @@ BAUD=2000000
 NO_FLASH=0
 SKIP_BUILD=0
 REBUILD_DOCKER=0
+CLEAN=0
 
 # ── Colour helpers ─────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
-info()    { echo -e "${BLUE}[build]${NC} $*"; }
-success() { echo -e "${GREEN}[build]${NC} $*"; }
-warn()    { echo -e "${YELLOW}[build]${NC} $*"; }
-die()     { echo -e "${RED}[build] ERROR:${NC} $*" >&2; exit 1; }
+info()    { echo -e "${BLUE}[build-minimal]${NC} $*"; }
+success() { echo -e "${GREEN}[build-minimal]${NC} $*"; }
+warn()    { echo -e "${YELLOW}[build-minimal]${NC} $*"; }
+die()     { echo -e "${RED}[build-minimal] ERROR:${NC} $*" >&2; exit 1; }
 
 # ── Usage ─────────────────────────────────────────────────────────────────
 usage() {
 cat <<EOF
-${BOLD}build.sh${NC} – Build and flash Linux for the BigTreeTech PandaTouch
+${BOLD}build-minimal.sh${NC} – Incremental minimal build + flash for BigTreeTech PandaTouch
 
 ${BOLD}Usage:${NC}
-  ./build.sh [OPTIONS]
+  ./build-minimal.sh [OPTIONS]
 
 ${BOLD}Options:${NC}
   -p, --port  PORT        Serial port  (default: auto-detect)
   -b, --baud  BAUD        Baud rate    (default: 2000000)
   --no-flash              Build images only; do not flash the device
   --skip-build            Flash pre-built images only (skip Docker build)
+  --clean                 Delete all build artefacts and rebuild from scratch
   --docker-image  NAME    Docker image name (default: esp32linuxbase)
   --rebuild-docker        Force rebuild of Docker image
   -h, --help              Show this help
 
 ${BOLD}Examples:${NC}
-  ./build.sh                         # full build + flash (auto-detect port)
-  ./build.sh -p /dev/ttyUSB0        # specify serial port
-  ./build.sh --no-flash              # build only, no flashing
-  ./build.sh --skip-build -p /dev/ttyUSB0  # flash pre-built images
+  ./build-minimal.sh                   # incremental build + flash (auto-detect port)
+  ./build-minimal.sh -p /dev/ttyUSB0  # specify serial port
+  ./build-minimal.sh --no-flash        # incremental build only, no flashing
+  ./build-minimal.sh --clean           # full rebuild from scratch
+  ./build-minimal.sh --skip-build -p /dev/ttyUSB0  # flash pre-built images
 
-${BOLD}Speed up rebuilds${NC} (edit esp32s3-linux/settings.cfg):
-  keep_toolchain=y
-  keep_buildroot=y
-  keep_rootfs=y
-  keep_bootloader=y
-  keep_etc=y
+${BOLD}Build times:${NC}
+  First run:       ~60 min (toolchain + kernel + esp-hosted)
+  Subsequent runs: ~5–10 min (incremental; only changed parts rebuild)
+
+${BOLD}What is built (minimal + framebuffer):${NC}
+  • Linux kernel: framebuffer, GT911 touch driver, serial console
+  • Rootfs: BusyBox + fbset
+  • Writable /etc (jffs2)
+  • esp-hosted Linux loader (OPI PSRAM fix)
+  Skipped: WiFi, tslib, iproute2, mtd-utils, usbutils, devmem2
 EOF
 }
 
@@ -101,6 +109,7 @@ while [[ $# -gt 0 ]]; do
         -b|--baud)          BAUD="$2";          shift 2 ;;
         --no-flash)         NO_FLASH=1;         shift ;;
         --skip-build)       SKIP_BUILD=1;       shift ;;
+        --clean)            CLEAN=1;            shift ;;
         --docker-image)     DOCKER_IMAGE="$2";  shift 2 ;;
         --rebuild-docker)   REBUILD_DOCKER=1;   shift ;;
         -h|--help)          usage; exit 0 ;;
@@ -137,7 +146,6 @@ detect_port() {
         /dev/cu.usbserial-* /dev/cu.usbmodem*
     )
     for p in "${candidates[@]}"; do
-        # Expand glob pattern; nullglob-safe: iterate over literal if no match
         for dev in $p; do  # intentional unquoted glob expansion
             if [[ -c "$dev" ]]; then
                 echo "$dev"
@@ -198,7 +206,7 @@ ensure_settings() {
 # ── Flash-only (skip Docker build) ─────────────────────────────────────────
 flash_prebuilt() {
     local build_dir
-    build_dir="$LINUX_DIR/esp32-linux-build/build/build-buildroot-esp32s3_pandatouch"
+    build_dir="$LINUX_DIR/esp32-linux-build/build/build-buildroot-esp32s3_pandatouch_fb"
 
     [[ -d "$build_dir" ]] || \
         die "No pre-built images found at $build_dir. Run without --skip-build first."
@@ -222,7 +230,7 @@ flash_prebuilt() {
             0x10000 "$esphosted_bin" \
             || die "esp-hosted flash failed"
     else
-        warn "esp-hosted binary not found at expected path, skipping"
+        warn "esp-hosted binary not found, skipping"
         warn "Run without --skip-build if this is your first flash"
     fi
 
@@ -251,35 +259,49 @@ flash_prebuilt() {
 run_docker_build() {
     local docker_args=(
         run --rm -it
-        --name pandatouch-linux-build
+        --name pandatouch-linux-build-minimal
         --user "$(id -u):$(id -g)"
-        # Grant dialout group access so idf.py/parttool.py can open the serial port.
-        # The container user is created with --user uid:gid which drops supplementary
-        # groups; --group-add dialout restores serial-port access.
         --group-add dialout
-        # Mount esp32s3-linux/ as /app so the script can reach
-        # pandatouch.conf, br2-external/, lcd-init/, etc. via ../
         -v "$LINUX_DIR:/app"
         --env-file "$LINUX_DIR/settings.cfg"
     )
 
+    # ── Incremental mode (default) ─────────────────────────────────────────
+    # Pass keep_* flags to preserve already-built components so only changed
+    # parts of the build are re-run.  --clean skips these, causing the inner
+    # script to wipe the build directory and start from scratch.
+    if [[ "$CLEAN" -eq 0 ]]; then
+        docker_args+=(
+            -e keep_toolchain=y
+            -e keep_buildroot=y
+            -e keep_bootloader=y
+            -e keep_rootfs=y
+        )
+        info "Incremental mode: toolchain, Buildroot source, and esp-hosted will be reused."
+        info "Use --clean to force a full rebuild from scratch."
+    else
+        warn "Clean build: all artefacts will be deleted and rebuilt from scratch."
+    fi
+
     if [[ "$NO_FLASH" -eq 0 ]]; then
         docker_args+=(--device "$PORT")
-        # Pass the detected port into the container so idf.py/parttool.py use it
         docker_args+=(-e "ESP_PORT=$PORT")
     fi
 
     docker_args+=("$DOCKER_IMAGE")
+    # Run the full rebuild script with the minimal+fb config
     docker_args+=("./esp32-linux-build/rebuild-esp32s3-pandatouch.sh")
+    docker_args+=("-c" "/app/pandatouch-fb.conf")
 
     if [[ "$NO_FLASH" -eq 1 ]]; then
         docker_args+=("--no-flash")
     fi
 
     info "Starting Docker build..."
-    info "  Image  : $DOCKER_IMAGE"
-    info "  Volume : $LINUX_DIR → /app"
-    [[ "$NO_FLASH" -eq 0 ]] && info "  Device : $PORT (ESP_PORT=$PORT)"
+    info "  Image   : $DOCKER_IMAGE"
+    info "  Config  : pandatouch-fb.conf (esp32s3_pandatouch_fb)"
+    info "  Volume  : $LINUX_DIR → /app"
+    [[ "$NO_FLASH" -eq 0 ]] && info "  Device  : $PORT (ESP_PORT=$PORT)"
     echo ""
 
     docker "${docker_args[@]}"
@@ -289,7 +311,7 @@ run_docker_build() {
 main() {
     echo ""
     echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
-    echo -e "${BOLD}║  PandaTouch Linux Builder                    ║${NC}"
+    echo -e "${BOLD}║  PandaTouch Linux – Minimal + Framebuffer    ║${NC}"
     echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
     echo ""
 
@@ -318,10 +340,10 @@ print_done() {
     echo -e "${GREEN}${BOLD}════════════════════════════════════════════${NC}"
     if [[ "$NO_FLASH" -eq 1 ]]; then
         success "Build complete! Images are in:"
-        echo "  $LINUX_DIR/esp32-linux-build/build/build-buildroot-esp32s3_pandatouch/images/"
+        echo "  $LINUX_DIR/esp32-linux-build/build/build-buildroot-esp32s3_pandatouch_fb/images/"
         echo ""
         echo "  To flash later, run:"
-        echo "    ./build.sh --skip-build -p /dev/ttyUSB0"
+        echo "    ./build-minimal.sh --skip-build -p /dev/ttyUSB0"
     else
         success "Build and flash complete!"
         echo ""
@@ -330,7 +352,11 @@ print_done() {
         echo "  2. Open a serial terminal at 115200 baud on $PORT"
         echo "     e.g.:  minicom -b 115200 -D $PORT"
         echo "            screen $PORT 115200"
-        echo "  3. Linux kernel messages should appear, followed by a shell"
+        echo "  3. Linux kernel messages appear, then a BusyBox shell"
+        echo "  4. The LCD backlight should turn on via /etc/init.d/S10display"
+        echo ""
+        echo "  To add WiFi and tools later (incremental):"
+        echo "    keep_toolchain=y keep_bootloader=y ./build.sh"
     fi
     echo -e "${GREEN}${BOLD}════════════════════════════════════════════${NC}"
     echo ""

@@ -131,27 +131,25 @@ cd ~/esp/esp-idf
 ```bash
 # 1. Clone (with submodules)
 git clone --recursive https://github.com/yurnam/Bigtreelinux.git
-cd Bigtreelinux/esp32s3-linux
+cd Bigtreelinux
 
-# 2. Copy settings
+# 2. Build + flash with a single command (recommended)
+./build.sh -p /dev/ttyACM0
+
+# Or, step by step inside Docker:
+cd esp32s3-linux
 cp settings.cfg.default settings.cfg
-
-# 3. Build Linux (Docker)
+docker build --build-arg DOCKER_USER=$USER --build-arg DOCKER_USERID=$UID -t esp32linuxbase .
 docker run --rm -it \
     --name pandatouch-linux \
     --user="$(id -u):$(id -g)" \
-    -v ./esp32-linux-build:/app \
+    -v "$PWD:/app" \
     --env-file settings.cfg \
     --device=/dev/ttyACM0 \
     esp32linuxbase \
-    ./rebuild-esp32s3-pandatouch.sh
+    ./esp32-linux-build/rebuild-esp32s3-pandatouch.sh
 
-# 4. Build and flash the lcd-init pre-loader (native host with IDF)
-cd esp32s3-linux/lcd-init
-idf.py set-target esp32s3
-idf.py -p /dev/ttyACM0 build flash
-
-# 5. Power-cycle → display shows splash → Linux boots on serial console
+# 3. Power-cycle → Linux boots on the serial console (USB-C, 115200 baud)
 ```
 
 ---
@@ -233,11 +231,16 @@ The lcd-init application:
 | nvs | 0x009000 | 16 KB | NVS (WiFi creds, etc.) |
 | otadata | 0x00D000 | 8 KB | OTA metadata |
 | phy_init | 0x00F000 | 4 KB | RF calibration |
-| bootloader_app | 0x010000 | 1 MB | lcd-init + esp-hosted |
-| linux | 0x110000 | 2.5 MB | Linux `xipImage` |
+| bootloader_app | 0x010000 | 1 MB + 64 KB | esp-hosted Linux loader |
+| linux | **0x120000** | 2.4375 MB | Linux `xipImage` (XIP addr `0x42120000`) |
 | rootfs | 0x390000 | 2.5 MB | cramfs root filesystem |
 | etc | 0x610000 | 512 KB | jffs2 writable `/etc` |
-| reserved | 0x690000 | ~1.44 MB | future use |
+| reserved | 0x690000 | ~1.4 MB | future use |
+
+> **Why 0x120000?**  The esp-hosted firmware reports `linux ptr = 0x42120000` at
+> boot. `0x42000000` is the ESP32-S3 flash XIP base, so the Linux partition must
+> be at flash offset `0x120000`. The factory-app partition is sized `0x110000`
+> (1 MB + 64 KB) so that it ends exactly at `0x120000`.
 
 Partition table: [`lcd-init/partitions.csv`](../lcd-init/partitions.csv)
 

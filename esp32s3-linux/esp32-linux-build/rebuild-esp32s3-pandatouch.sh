@@ -179,6 +179,14 @@ if [ ! -d "build-buildroot-$BUILDROOT_CONFIG" ] || \
         --file "build-buildroot-$BUILDROOT_CONFIG/.config" \
         --set-str TOOLCHAIN_EXTERNAL_CUSTOM_PREFIX \
         '$(ARCH)-esp32s3-linux-uclibcfdpic'
+
+    # Force BusyBox reconfigure: .stamp_configured may exist from a previous
+    # failed build where CONFIG_MMU was disabled.  Buildroot's
+    # BUSYBOX_CONFIG_FIXUPS (which enables CONFIG_MMU when BR2_USE_MMU=y) only
+    # runs during the configure step.  Deleting these stamps ensures the
+    # configure step is not skipped on the next incremental build.
+    rm -f "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_configured \
+          "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_built
 fi
 
 nice make -C buildroot \

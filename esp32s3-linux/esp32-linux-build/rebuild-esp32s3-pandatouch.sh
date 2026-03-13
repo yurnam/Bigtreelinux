@@ -22,6 +22,8 @@
 #   keep_buildroot=y   skip buildroot re-download
 #   keep_bootloader=y  skip esp-hosted re-download
 #   keep_etc=y         skip reflashing /etc partition
+#   ESP_PORT=<dev>     serial port to use for flashing (e.g. /dev/ttyUSB0)
+#                      if unset, idf.py/parttool.py will auto-detect
 #
 # PSRAM NOTE
 # ──────────
@@ -29,6 +31,13 @@
 # use QUAD-SPI mode.  Running Linux with QUAD init on OPI hardware causes
 # the kernel to crash immediately (boot loop, rst:0xc).
 # sdkconfig.pandatouch.defaults sets CONFIG_SPIRAM_MODE_OCT=y to fix this.
+#
+# DTS NOTE
+# ────────
+# The device tree source is handled by BR2_LINUX_KERNEL_CUSTOM_DTS_PATH in
+# esp32s3_pandatouch_defconfig.  Buildroot copies the DTS into the kernel
+# source tree via a post-patch hook, BEFORE the kernel is compiled.  No
+# manual DTS injection is needed here.
 
 SET_BAUDRATE='-b 2000000'
 
@@ -45,12 +54,17 @@ LINUX_DIR="$(realpath "$SCRIPT_DIR/..")"
 
 PANDATOUCH_CONF="$LINUX_DIR/pandatouch.conf"
 BR2_EXTERNAL_DIR="$LINUX_DIR/br2-external"
-DTS_SRC="$LINUX_DIR/esp32s3-pandatouch.dts"
 PARTITIONS_CSV="$LINUX_DIR/lcd-init/partitions.csv"
 SDKCONFIG_DEFAULTS="$SCRIPT_DIR/sdkconfig.pandatouch.defaults"
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 function die() { echo "ERROR: $1" >&2; exit 1; }
+
+# Build the optional -p PORT arguments for idf.py / parttool.py.
+# Usage:  idf.py "${PORT_ARGS[@]}" -b 2000000 flash
+# Avoids unquoted word-splitting while still working when ESP_PORT is unset.
+PORT_ARGS=()
+[ -n "${ESP_PORT:-}" ] && PORT_ARGS=("-p" "$ESP_PORT")
 
 # ── Argument parsing ────────────────────────────────────────────────────────
 conf="$PANDATOUCH_CONF"
@@ -73,7 +87,6 @@ while : ; do
 done
 
 [ -f "$conf" ]              || die "Config not found: $conf"
-[ -f "$DTS_SRC" ]           || die "DTS not found: $DTS_SRC"
 [ -f "$PARTITIONS_CSV" ]    || die "partitions.csv not found: $PARTITIONS_CSV"
 [ -f "$SDKCONFIG_DEFAULTS" ]|| die "sdkconfig.pandatouch.defaults not found: $SDKCONFIG_DEFAULTS"
 
@@ -84,9 +97,9 @@ done
 echo "=== PandaTouch Linux build ==="
 echo "    BUILDROOT_CONFIG  = $BUILDROOT_CONFIG"
 echo "    BR2_EXTERNAL      = $BR2_EXTERNAL_DIR"
-echo "    DTS source        = $DTS_SRC"
 echo "    partitions.csv    = $PARTITIONS_CSV"
 echo "    NO_FLASH          = $NO_FLASH"
+[ -n "${ESP_PORT:-}" ] && echo "    ESP_PORT          = $ESP_PORT"
 echo ""
 
 # ── Autoconf 2.71 ─────────────────────────────────────────────────────────
@@ -104,13 +117,13 @@ fi
 export PATH="$(pwd)/autoconf-2.71/root/bin:$PATH"
 
 # ── Clean / prepare build directory ───────────────────────────────────────
-if [ -z "$keep_toolchain$keep_buildroot$keep_rootfs$keep_bootloader" ] ; then
+if [ -z "${keep_toolchain:-}${keep_buildroot:-}${keep_rootfs:-}${keep_bootloader:-}" ] ; then
     rm -rf build
 else
-    [ -n "$keep_toolchain"  ] || rm -rf "build/crosstool-NG/builds/$CTNG_CONFIG"
-    [ -n "$keep_rootfs"     ] || rm -rf "build/build-buildroot-$BUILDROOT_CONFIG"
-    [ -n "$keep_buildroot"  ] || rm -rf "build/buildroot"
-    [ -n "$keep_bootloader" ] || rm -rf "build/esp-hosted"
+    [ -n "${keep_toolchain:-}"  ] || rm -rf "build/crosstool-NG/builds/$CTNG_CONFIG"
+    [ -n "${keep_rootfs:-}"     ] || rm -rf "build/build-buildroot-$BUILDROOT_CONFIG"
+    [ -n "${keep_buildroot:-}"  ] || rm -rf "build/buildroot"
+    [ -n "${keep_bootloader:-}" ] || rm -rf "build/esp-hosted"
 fi
 mkdir -p build
 cd build
@@ -135,6 +148,11 @@ if [ ! -x "crosstool-NG/builds/$CTNG_CONFIG/bin/$CTNG_CONFIG-gcc" ] ; then
 fi
 
 # ── Buildroot (kernel + rootfs) ───────────────────────────────────────────
+# The DTS (esp32s3-pandatouch.dts) is handled entirely by Buildroot via
+# BR2_LINUX_KERNEL_CUSTOM_DTS_PATH.  Buildroot copies it into the kernel
+# source tree as a post-patch hook, before kernel compilation starts.
+# No manual DTS injection is needed.
+
 if [ ! -d buildroot ] ; then
     git clone https://github.com/jcmvbkbc/buildroot -b "$BUILDROOT_VER"
 else
@@ -162,28 +180,9 @@ if [ ! -d "build-buildroot-$BUILDROOT_CONFIG" ] ; then
         '$(ARCH)-esp32s3-linux-uclibcfdpic'
 fi
 
-# ── Inject DTS into kernel source tree ────────────────────────────────────
-# Called twice: once before build (if kernel already downloaded) and once
-# after the build triggers the kernel download/extract.
-install_dts() {
-    local linux_src
-    linux_src=$(find "build-buildroot-$BUILDROOT_CONFIG/build" \
-        -maxdepth 1 -type d -name 'linux-*' 2>/dev/null | head -1)
-    if [ -n "$linux_src" ] ; then
-        install -m 644 "$DTS_SRC" \
-            "$linux_src/arch/xtensa/boot/dts/esp32s3-pandatouch.dts"
-        echo "[pandatouch] DTS installed: $linux_src/arch/xtensa/boot/dts/"
-    fi
-}
-
-install_dts
-
 nice make -C buildroot \
     O="$(pwd)/build-buildroot-$BUILDROOT_CONFIG" \
     BR2_EXTERNAL="$BR2_EXTERNAL_DIR"
-
-# Re-install DTS in case kernel sources were downloaded during the build
-install_dts
 
 [ -f "build-buildroot-$BUILDROOT_CONFIG/images/xipImage"     ] || exit 1
 [ -f "build-buildroot-$BUILDROOT_CONFIG/images/rootfs.cramfs" ] || exit 1
@@ -223,7 +222,7 @@ idf.py build
 
 if [ "$NO_FLASH" -eq 0 ] ; then
     read -p 'Ready to flash esp-hosted (Linux loader)... press Enter'
-    while ! idf.py $SET_BAUDRATE flash ; do
+    while ! idf.py "${PORT_ARGS[@]}" $SET_BAUDRATE flash ; do
         read -p 'Flash failed. Press Enter to retry, Ctrl-C to abort'
     done
 fi
@@ -232,17 +231,17 @@ popd
 
 # ── Flash Linux kernel, rootfs, and /etc ──────────────────────────────────
 if [ "$NO_FLASH" -eq 0 ] ; then
-    parttool.py $SET_BAUDRATE write_partition \
+    parttool.py "${PORT_ARGS[@]}" $SET_BAUDRATE write_partition \
         --partition-name linux \
         --input "build-buildroot-$BUILDROOT_CONFIG/images/xipImage"
 
-    parttool.py $SET_BAUDRATE write_partition \
+    parttool.py "${PORT_ARGS[@]}" $SET_BAUDRATE write_partition \
         --partition-name rootfs \
         --input "build-buildroot-$BUILDROOT_CONFIG/images/rootfs.cramfs"
 
-    if [ -z "$keep_etc" ] ; then
+    if [ -z "${keep_etc:-}" ] ; then
         read -p 'Ready to flash /etc... press Enter'
-        parttool.py $SET_BAUDRATE write_partition \
+        parttool.py "${PORT_ARGS[@]}" $SET_BAUDRATE write_partition \
             --partition-name etc \
             --input "build-buildroot-$BUILDROOT_CONFIG/images/etc.jffs2"
     fi

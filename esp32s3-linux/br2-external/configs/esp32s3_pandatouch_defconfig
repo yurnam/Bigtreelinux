@@ -38,9 +38,12 @@ BR2_LINUX_KERNEL_DEFCONFIG="esp32s3"
 # Extra kernel config fragment enables framebuffer, GT911, USB storage:
 BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_PANDATOUCH_PATH)/board/pandatouch/linux-extras.config"
 # Device-tree
+# CUSTOM_DTS_PATH tells Buildroot to copy the DTS into the kernel source tree
+# BEFORE the kernel is compiled (a Buildroot post-patch hook).  This avoids
+# the race condition where an in-tree reference would fail on a fresh build
+# because the kernel source hasn't been extracted yet at defconfig time.
 BR2_LINUX_KERNEL_DTS_SUPPORT=y
-# The DTS is provided via the external tree; copied into the kernel DTS dir
-# by the post-build script.
+BR2_LINUX_KERNEL_CUSTOM_DTS_PATH="$(BR2_EXTERNAL_PANDATOUCH_PATH)/board/pandatouch/esp32s3-pandatouch.dts"
 BR2_LINUX_KERNEL_INTREE_DTS_NAME="esp32s3-pandatouch"
 BR2_LINUX_KERNEL_IMAGE_TARGET_NAME="xipImage"
 

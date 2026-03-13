@@ -137,8 +137,8 @@ detect_port() {
         /dev/cu.usbserial-* /dev/cu.usbmodem*
     )
     for p in "${candidates[@]}"; do
-        # expand globs safely
-        for dev in $p; do
+        # Expand glob pattern; nullglob-safe: iterate over literal if no match
+        for dev in $p; do  # intentional unquoted glob expansion
             if [[ -c "$dev" ]]; then
                 echo "$dev"
                 return
@@ -253,6 +253,10 @@ run_docker_build() {
         run --rm -it
         --name pandatouch-linux-build
         --user "$(id -u):$(id -g)"
+        # Grant dialout group access so idf.py/parttool.py can open the serial port.
+        # The container user is created with --user uid:gid which drops supplementary
+        # groups; --group-add dialout restores serial-port access.
+        --group-add dialout
         # Mount esp32s3-linux/ as /app so the script can reach
         # pandatouch.conf, br2-external/, lcd-init/, etc. via ../
         -v "$LINUX_DIR:/app"
@@ -261,6 +265,8 @@ run_docker_build() {
 
     if [[ "$NO_FLASH" -eq 0 ]]; then
         docker_args+=(--device "$PORT")
+        # Pass the detected port into the container so idf.py/parttool.py use it
+        docker_args+=(-e "ESP_PORT=$PORT")
     fi
 
     docker_args+=("$DOCKER_IMAGE")
@@ -273,7 +279,7 @@ run_docker_build() {
     info "Starting Docker build..."
     info "  Image  : $DOCKER_IMAGE"
     info "  Volume : $LINUX_DIR → /app"
-    [[ "$NO_FLASH" -eq 0 ]] && info "  Device : $PORT"
+    [[ "$NO_FLASH" -eq 0 ]] && info "  Device : $PORT (ESP_PORT=$PORT)"
     echo ""
 
     docker "${docker_args[@]}"

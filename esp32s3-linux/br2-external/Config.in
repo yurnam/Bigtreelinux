@@ -1,0 +1,8 @@
+# Buildroot external tree – BigTreeTech PandaTouch
+#
+# This file is intentionally minimal: all board-specific configuration
+# lives in configs/esp32s3_pandatouch_defconfig and in the board/
+# directory, so no extra Kconfig symbols are needed right now.
+#
+# To add custom packages in the future, add:
+#   source "$BR2_EXTERNAL_PANDATOUCH_PATH/package/<name>/Config.in"

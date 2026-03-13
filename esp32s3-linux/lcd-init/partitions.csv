@@ -1,0 +1,24 @@
+# partitions.csv – PandaTouch 8 MB flash layout
+#
+# Partition name   Type    SubType   Offset    Size      Flags
+# ─────────────────────────────────────────────────────────────
+# nvs              data    nvs       0x9000    0x4000    (NVS for wifi creds, etc.)
+# otadata          data    ota       0xd000    0x2000
+# phy_init         data    phy       0xf000    0x1000
+# bootloader_app   app     factory   0x10000   0x100000  (lcd-init + esp-hosted: ~1 MB)
+# linux            app     ota_0     0x110000  0x280000  (Linux xipImage: 2.5 MB)
+# rootfs           data    0x40      0x390000  0x280000  (cramfs rootfs: 2.5 MB)
+# etc              data    0x41      0x610000  0x80000   (jffs2 /etc: 512 KB)
+# reserved         data    0x42      0x690000  0x170000  (future use: ~1.44 MB)
+#
+# Total: 8 MB (0x800000)
+
+# name,         type, subtype,  offset,   size,     flags
+nvs,            data, nvs,      0x9000,   0x4000,
+otadata,        data, ota,      0xd000,   0x2000,
+phy_init,       data, phy,      0xf000,   0x1000,
+bootloader_app, app,  factory,  0x10000,  0x100000,
+linux,          app,  ota_0,    0x110000, 0x280000,
+rootfs,         data, 0x40,     0x390000, 0x280000,
+etc,            data, 0x41,     0x610000, 0x80000,
+reserved,       data, 0x42,     0x690000, 0x170000,

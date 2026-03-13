@@ -159,15 +159,18 @@ else
 fi
 
 # ── Patch Buildroot's busybox.mk for Xtensa-MMU targets ──────────────────
-# In the jcmvbkbc xtensa-fdpic fork the BR2_XTENSA_USE_MMU → select
-# BR2_USE_MMU Kconfig chain is broken.  busybox.mk's BUSYBOX_KCONFIG_FIXUP_CMDS
-# evaluates $(BR2_USE_MMU) which is empty after syncconfig, so it calls
-# KCONFIG_DISABLE_OPT,CONFIG_MMU *after* any config fragment — overriding
-# CONFIG_MMU=y and causing ash to fail with the NOMMU compile error.
-# This sed patch makes the fixup also accept $(BR2_XTENSA_USE_MMU) (a valid
-# Kconfig symbol that survives syncconfig) as proof of a hardware MMU.
-if ! grep -q 'BR2_XTENSA_USE_MMU' buildroot/package/busybox/busybox.mk 2>/dev/null; then
-    sed -i 's#\$(if \$(BR2_USE_MMU),,#$(if $(or $(BR2_USE_MMU),$(BR2_XTENSA_USE_MMU)),,#' \
+# busybox.mk's BUSYBOX_KCONFIG_FIXUP_CMDS contains:
+#   $(if $(BR2_USE_MMU),,$(call KCONFIG_DISABLE_OPT,CONFIG_MMU))
+# In the jcmvbkbc xtensa-fdpic fork, Buildroot's syncconfig strips
+# BR2_USE_MMU from auto.conf, so this condition ALWAYS fires and disables
+# CONFIG_MMU — overriding the busybox-mmu.config fragment's CONFIG_MMU=y
+# and causing ash to fail:
+#   shell/ash.c: #error "Do not even bother, ash will not run on NOMMU machine"
+# Fix: delete the KCONFIG_DISABLE_OPT line entirely.  The busybox-mmu.config
+# fragment already guarantees CONFIG_MMU=y; we just need to stop FIXUP_CMDS
+# from overriding it.  This sed is idempotent.
+if grep -q 'KCONFIG_DISABLE_OPT.*CONFIG_MMU' buildroot/package/busybox/busybox.mk 2>/dev/null; then
+    sed -i '/KCONFIG_DISABLE_OPT.*CONFIG_MMU/d' \
         buildroot/package/busybox/busybox.mk \
         || die "Failed to patch buildroot/package/busybox/busybox.mk"
 fi
@@ -193,12 +196,12 @@ if [ ! -d "build-buildroot-$BUILDROOT_CONFIG" ] || \
         --set-str TOOLCHAIN_EXTERNAL_CUSTOM_PREFIX \
         '$(ARCH)-esp32s3-linux-uclibcfdpic'
 
-    # Force BusyBox reconfigure: .stamp_configured may exist from a previous
-    # failed build where CONFIG_MMU was disabled.  Buildroot's
-    # BUSYBOX_CONFIG_FIXUPS (which enables CONFIG_MMU when BR2_USE_MMU=y) only
-    # runs during the configure step.  Deleting these stamps ensures the
-    # configure step is not skipped on the next incremental build.
-    rm -f "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_configured \
+    # Force BusyBox reconfigure: stamps may exist from a previous
+    # failed build where CONFIG_MMU was disabled.  Deleting these stamps
+    # ensures Buildroot re-runs the kconfig fixup and configure steps
+    # so CONFIG_MMU=y from busybox-mmu.config is properly applied.
+    rm -f "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_kconfig_fixup_done \
+          "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_configured \
           "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_built
 fi
 

@@ -35,6 +35,21 @@ popd
 # kernel and rootfs
 #
 git clone https://github.com/jcmvbkbc/buildroot -b xtensa-2023.02-fdpic
+
+#
+# Patch Buildroot's busybox.mk for Xtensa-MMU targets
+#
+# In the jcmvbkbc xtensa-fdpic fork the BR2_XTENSA_USE_MMU → BR2_USE_MMU
+# Kconfig chain is broken.  busybox.mk's BUSYBOX_KCONFIG_FIXUP_CMDS runs
+# KCONFIG_DISABLE_OPT,CONFIG_MMU *after* any config fragment, overriding
+# CONFIG_MMU=y and causing ash to fail:
+#   shell/ash.c: #error "Do not even bother, ash will not run on NOMMU machine"
+# This sed is idempotent; it is safe to apply on every run.
+if ! grep -q 'BR2_XTENSA_USE_MMU' buildroot/package/busybox/busybox.mk 2>/dev/null; then
+	sed -i 's#\$(if \$(BR2_USE_MMU),,#$(if $(or $(BR2_USE_MMU),$(BR2_XTENSA_USE_MMU)),,#' \
+		buildroot/package/busybox/busybox.mk
+fi
+
 nice make -C buildroot O=`pwd`/build-xtensa-2023.02-fdpic-esp32s3 esp32s3_defconfig
 buildroot/utils/config --file build-xtensa-2023.02-fdpic-esp32s3/.config --set-str TOOLCHAIN_EXTERNAL_PATH `pwd`/crosstool-NG/builds/xtensa-esp32s3-linux-uclibcfdpic
 buildroot/utils/config --file build-xtensa-2023.02-fdpic-esp32s3/.config --set-str TOOLCHAIN_EXTERNAL_PREFIX '$(ARCH)-esp32s3-linux-uclibcfdpic'

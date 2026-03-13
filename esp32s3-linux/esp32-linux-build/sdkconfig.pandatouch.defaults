@@ -1,0 +1,49 @@
+# sdkconfig.pandatouch.defaults
+# ──────────────────────────────
+# Minimal IDF sdkconfig.defaults for the jcmvbkbc esp-hosted
+# network_adapter firmware on the BigTreeTech PandaTouch.
+#
+# Applied by rebuild-esp32s3-pandatouch.sh BEFORE `idf.py set-target esp32s3`
+# so that IDF merges these overrides into the generated sdkconfig.
+#
+# ═══════════════════════════════════════════════════════════════════════════
+# WHY THIS FILE EXISTS – the PSRAM boot-loop
+# ═══════════════════════════════════════════════════════════════════════════
+# The generic esp-hosted configs (sdkconfig.defaults.esp32s3,
+# sdkconfig.defaults.esp32s3.8n8r) initialise PSRAM in QUAD SPI mode.
+# The PandaTouch uses 8 MB Octal-SPI (OPI/DRAM-mode) PSRAM wired with
+# all 8 data lines.  If the IDF PSRAM driver initialises the chip in QUAD
+# mode it either fails silently or corrupts the PSRAM contents.
+# Linux then crashes the instant it tries to access its own heap/stack,
+# producing the boot loop:
+#
+#   linux ptr = 0x42120000
+#   rst:0xc (RTC_SW_CPU_RST), Saved PC:0x4037d1fe   ← ROM exception handler
+#
+# Setting CONFIG_SPIRAM_MODE_OCT=y causes IDF to initialise the PSRAM in
+# 8-line DDR mode, which is what the PandaTouch hardware requires.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── Flash: QIO @ 80 MHz, 8 MB ──────────────────────────────────────────────
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+
+# ── CPU @ 240 MHz ─────────────────────────────────────────────────────────
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# ── PSRAM: Octal-SPI (OPI), 8 MB @ 80 MHz ─────────────────────────────────
+# THIS IS THE KEY FIX for the PandaTouch.
+# Do NOT set SPIRAM_FETCH_INSTRUCTIONS or SPIRAM_RODATA – we want IDF to
+# use only internal RAM before jumping to Linux so Linux gets the full PSRAM.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# ── Partition table ────────────────────────────────────────────────────────
+# Use our custom partitions.csv (copied into the build dir by the script).
+# This ensures the partition table flashed by `idf.py flash` is identical
+# to the one used by `parttool.py` when writing Linux/rootfs/etc.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_MD5=y

@@ -76,6 +76,26 @@ else
 	git pull
 	popd
 fi
+
+#
+# Patch Buildroot's busybox.mk for Xtensa-MMU targets
+#
+# busybox.mk's BUSYBOX_KCONFIG_FIXUP_CMDS contains:
+#   $(if $(BR2_USE_MMU),,$(call KCONFIG_DISABLE_OPT,CONFIG_MMU))
+# In the jcmvbkbc xtensa-fdpic fork, Buildroot's syncconfig strips
+# BR2_USE_MMU from auto.conf, so this condition ALWAYS fires and disables
+# CONFIG_MMU — overriding the busybox-mmu.config fragment's CONFIG_MMU=y
+# and causing ash to fail:
+#   shell/ash.c: #error "Do not even bother, ash will not run on NOMMU machine"
+# Fix: delete the KCONFIG_DISABLE_OPT line entirely.  The busybox-mmu.config
+# fragment already guarantees CONFIG_MMU=y; we just need to stop FIXUP_CMDS
+# from overriding it.  This sed is idempotent.
+if grep -q 'KCONFIG_DISABLE_OPT.*CONFIG_MMU' buildroot/package/busybox/busybox.mk 2>/dev/null; then
+	sed -i '/KCONFIG_DISABLE_OPT.*CONFIG_MMU/d' \
+		buildroot/package/busybox/busybox.mk \
+		|| die "Failed to patch buildroot/package/busybox/busybox.mk"
+fi
+
 if [ ! -d build-buildroot-esp32 ] ; then
 	nice make -C buildroot O=`pwd`/build-buildroot-esp32 $BUILDROOT_CONFIG
 	buildroot/utils/config --file build-buildroot-esp32/.config --set-str TOOLCHAIN_EXTERNAL_PATH `pwd`/crosstool-NG/builds/xtensa-esp32-linux-uclibcfdpic

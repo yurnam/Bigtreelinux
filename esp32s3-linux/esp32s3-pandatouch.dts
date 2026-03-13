@@ -1,0 +1,148 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Device Tree for BigTreeTech PandaTouch
+ *
+ * SoC:     ESP32-S3 (Xtensa LX7 @ 240 MHz, dual-core)
+ * Flash:   8 MB (QIO, 80 MHz) – XIP for kernel
+ * PSRAM:   8 MB Octal (OPI, 80 MHz) – main RAM + framebuffer
+ * Display: 800×480 RGB565 parallel LCD (DE mode, PCLK = 14.8 MHz)
+ * Touch:   Goodix GT911, I²C0 @ 0x5D, 400 kHz
+ * USB:     Native USB OTG (D−=GPIO19, D+=GPIO20)
+ * Console: UART0 (TXD=GPIO43, RXD=GPIO44)
+ *
+ * Memory layout (PSRAM, 0x3C000000 base):
+ *   0x3C000000 – 0x3C0BB7FF  framebuffer  (800 × 480 × 2 = 768 000 B)
+ *   0x3C0BB800 – 0x3FFFFFFF  Linux RAM    (~7.25 MB available)
+ *
+ * The lcd-init ESP-IDF application (see esp32s3-linux/lcd-init/) must be
+ * flashed and executed before Linux boots.  It initialises the LCD_CAM
+ * RGB peripheral and keeps it scanning out from the PSRAM framebuffer.
+ * After initialisation it chains to the esp-hosted network_adapter
+ * firmware which in turn loads and starts the Linux kernel.
+ */
+
+/dts-v1/;
+
+#include "esp32s3.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/input/input.h>
+
+/ {
+	model = "BigTreeTech PandaTouch";
+	compatible = "bigtreetech,pandatouch", "espressif,esp32s3";
+
+	chosen {
+		/*
+		 * earlycon uses the ESP32-S3 UART0 debug port.
+		 * root=mtd:rootfs  – cramfs squished rootfs flashed to the
+		 *                    "rootfs" SPI-NOR partition.
+		 * fbcon=map:0      – attach virtual console to fb0.
+		 */
+		bootargs = "console=ttyS0,115200n8 earlycon=esp32uart,mmio32,0x60000000 root=mtd:rootfs rootfstype=cramfs ro loglevel=7 fbcon=map:0";
+		stdout-path = "serial0:115200n8";
+	};
+
+	aliases {
+		serial0 = &uart0;
+		i2c0    = &i2c0;
+		i2c1    = &i2c1;
+	};
+
+	/*
+	 * Internal SRAM – used by the kernel for critical / DMA buffers.
+	 * The exact usable window depends on ROM reservations; ~400 KB is
+	 * a conservative estimate for ESP32-S3 rev 3+.
+	 */
+	memory@3fc80000 {
+		device_type = "memory";
+		reg = <0x3fc80000 0x60000>;
+	};
+
+	/*
+	 * External PSRAM – primary Linux RAM.
+	 * The first 768 KB (0xBB800) is reserved for the framebuffer and
+	 * must NOT be handed to the kernel allocator.
+	 */
+	memory@3c0bb800 {
+		device_type = "memory";
+		reg = <0x3c0bb800 0x3f4800>;
+	};
+
+	/*
+	 * Simple framebuffer
+	 * -----------------
+	 * The lcd-init application allocates exactly 800 × 480 × 2 bytes
+	 * at the start of PSRAM (0x3C000000) and configures the LCD_CAM
+	 * DMA engine to scan it out continuously.  The kernel sees this as
+	 * a 16-bit RGB565 framebuffer device (/dev/fb0) without needing any
+	 * knowledge of the LCD_CAM hardware registers.
+	 */
+	framebuffer0: framebuffer@3c000000 {
+		compatible = "simple-framebuffer";
+		reg = <0x3c000000 0x000bb800>;
+		width  = <800>;
+		height = <480>;
+		stride = <1600>;	/* 800 px × 2 bytes/px */
+		format = "r5g6b5";
+		status = "okay";
+	};
+
+	/*
+	 * Backlight – GPIO21 driven HIGH enables the LCD backlight power
+	 * rail.  Linux leaves the backlight fully on at boot; userspace can
+	 * implement PWM dimming via sysfs if a GPIO-PWM driver is loaded.
+	 */
+	backlight: backlight {
+		compatible = "gpio-backlight";
+		gpios = <&gpio0 21 GPIO_ACTIVE_HIGH>;
+		default-on;
+	};
+};
+
+/* ── UART0: kernel console ─────────────────────────────────────────────── */
+&uart0 {
+	status = "okay";
+};
+
+/* ── I²C0: Goodix GT911 touch controller ───────────────────────────────── */
+/*
+ * GT911 I²C address: 0x5D when ADDR pin is pulled LOW (default on PandaTouch).
+ * Interrupt: falling-edge on GPIO40 (open-drain, active-low).
+ * Reset:     active-low on GPIO41.
+ */
+&i2c0 {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	touchscreen: gt911@5d {
+		compatible = "goodix,gt911";
+		reg = <0x5d>;
+
+		interrupt-parent = <&gpio0>;
+		interrupts = <40 IRQ_TYPE_EDGE_FALLING>;
+		reset-gpios   = <&gpio0 41 GPIO_ACTIVE_LOW>;
+		irq-gpios     = <&gpio0 40 IRQ_TYPE_EDGE_FALLING>;
+
+		touchscreen-size-x = <800>;
+		touchscreen-size-y = <480>;
+		status = "okay";
+	};
+};
+
+/* ── I²C1: Expansion header (P2) ───────────────────────────────────────── */
+&i2c1 {
+	status = "okay";
+	clock-frequency = <100000>;
+};
+
+/*
+ * ── USB OTG ─────────────────────────────────────────────────────────────
+ * D−: GPIO19 / D+: GPIO20 (native ESP32-S3 USB PHY, routed to USB-A port)
+ * In "otg" mode Linux can switch between host and peripheral at runtime.
+ * When acting as host, attach a USB thumb drive for larger rootfs.
+ */
+&usb0 {
+	dr_mode = "otg";
+	status = "okay";
+};

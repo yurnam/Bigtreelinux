@@ -1,0 +1,111 @@
+# Buildroot defconfig for BigTreeTech PandaTouch (ESP32-S3, 8 MB flash, 8 MB PSRAM)
+#
+# Based on the upstream esp32s3_devkit_c1_8m configuration from
+# https://github.com/jcmvbkbc/buildroot (branch xtensa-2024.08-fdpic)
+# with the following additions:
+#   - Device-tree source for PandaTouch (esp32s3-pandatouch.dts)
+#   - Kernel config fragment enabling framebuffer, GT911 touch, USB storage
+#   - Rootfs overlay with display init scripts
+#   - fbset, tslib, evtest userspace packages
+
+# ── Architecture ──────────────────────────────────────────────────────────
+BR2_xtensa=y
+# Use xtensa-dynconfig (gcc-13 / binutils-2.40+).
+# The rebuild script sets XTENSA_GNU_CONFIG="<path>/xtensa-dynconfig/esp32s3.so"
+# before calling make; Buildroot passes it through to the toolchain.
+BR2_XTENSA_DYNCONFIG=y
+BR2_XTENSA_LITTLE_ENDIAN=y
+BR2_XTENSA_USE_MMU=y
+# Explicitly set BR2_USE_MMU so busybox.mk's BUSYBOX_CONFIG_FIXUPS enables
+# CONFIG_MMU instead of disabling it.  In the jcmvbkbc xtensa-fdpic fork the
+# BR2_XTENSA_USE_MMU → select BR2_USE_MMU chain is broken.
+BR2_USE_MMU=y
+
+# ── Toolchain ─────────────────────────────────────────────────────────────
+# The path and prefix are injected by rebuild-esp32s3-pandatouch.sh after
+# the defconfig is applied (same technique as the upstream script).
+BR2_TOOLCHAIN_EXTERNAL=y
+BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y
+BR2_TOOLCHAIN_EXTERNAL_PATH=""
+BR2_TOOLCHAIN_EXTERNAL_GCC_12=y
+# crosstool-NG clones linux v6.6 for kernel headers (branch v6.6):
+BR2_TOOLCHAIN_EXTERNAL_HEADERS_6_6=y
+BR2_TOOLCHAIN_EXTERNAL_CUSTOM_UCLIBC=y
+# uClibc-ng built with --enable-wchar:
+BR2_TOOLCHAIN_EXTERNAL_WCHAR=y
+BR2_TOOLCHAIN_EXTERNAL_HAS_SSP=y
+BR2_TOOLCHAIN_EXTERNAL_CXX=y
+
+# ── Build options ─────────────────────────────────────────────────────────
+BR2_OPTIMIZE_S=y
+
+# ── Kernel ────────────────────────────────────────────────────────────────
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_GIT=y
+BR2_LINUX_KERNEL_CUSTOM_REPO_URL="https://github.com/jcmvbkbc/linux-xtensa.git"
+BR2_LINUX_KERNEL_CUSTOM_REPO_VERSION="xtensa-fdpic"
+BR2_LINUX_KERNEL_DEFCONFIG="esp32s3"
+# Extra kernel config fragment enables framebuffer, GT911, USB storage:
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_PANDATOUCH_PATH)/board/pandatouch/linux-extras.config"
+# Device-tree
+# CUSTOM_DTS_PATH tells Buildroot to copy the DTS into the kernel source tree
+# BEFORE the kernel is compiled (a Buildroot post-patch hook).  This avoids
+# the race condition where an in-tree reference would fail on a fresh build
+# because the kernel source hasn't been extracted yet at defconfig time.
+BR2_LINUX_KERNEL_DTS_SUPPORT=y
+BR2_LINUX_KERNEL_CUSTOM_DTS_PATH="$(BR2_EXTERNAL_PANDATOUCH_PATH)/board/pandatouch/esp32s3-pandatouch.dts"
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="esp32s3-pandatouch"
+BR2_LINUX_KERNEL_IMAGE_TARGET_NAME="xipImage"
+
+# ── System ────────────────────────────────────────────────────────────────
+BR2_TARGET_GENERIC_HOSTNAME="pandatouch"
+BR2_TARGET_GENERIC_ISSUE="BigTreeTech PandaTouch Linux"
+# Use the rootfs overlay to inject display/touch init scripts
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_PANDATOUCH_PATH)/board/pandatouch/rootfs-overlay"
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_PANDATOUCH_PATH)/board/pandatouch/post-build.sh"
+# mkfs-etc.sh runs inside the jffs2 fakeroot and trims the staging tree so
+# only /etc content ends up in the jffs2 image (mirroring upstream behaviour).
+BR2_ROOTFS_POST_FAKEROOT_SCRIPT="$(BR2_EXTERNAL_PANDATOUCH_PATH)/board/pandatouch/mkfs-etc.sh"
+# post-image.sh renames the generic rootfs.jffs2 → etc.jffs2 so the flash
+# script can identify and write it to the correct SPI-NOR partition.
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_PANDATOUCH_PATH)/board/pandatouch/post-image.sh"
+
+# ── Root filesystem ───────────────────────────────────────────────────────
+# cramfs (read-only, compressed) fits in the "rootfs" SPI-NOR partition.
+BR2_TARGET_ROOTFS_CRAMFS=y
+# jffs2 for the writable /etc partition (flashed separately as etc.jffs2).
+# FLASH_64 matches the upstream devkit layout (64-byte erase block minimum).
+BR2_TARGET_ROOTFS_JFFS2=y
+BR2_TARGET_ROOTFS_JFFS2_FLASH_64=y
+
+# ── Packages ──────────────────────────────────────────────────────────────
+BR2_PACKAGE_BUSYBOX=y
+# Force CONFIG_MMU=y so ash compiles (ESP32-S3 has a hardware MMU).
+BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_PANDATOUCH_PATH)/board/pandatouch/busybox-mmu.config"
+
+# Framebuffer utilities
+BR2_PACKAGE_FBSET=y
+
+# Touchscreen userspace library (calibration, event normalisation)
+BR2_PACKAGE_TSLIB=y
+BR2_PACKAGE_TSLIB_TESTS=y
+
+# Input event monitor (useful for debugging touch / keyboard)
+BR2_PACKAGE_EVTEST=y
+
+# devmem2 – direct MMIO access (useful for GPIO / LCD register debugging)
+BR2_PACKAGE_DEVMEM2=y
+
+# mtd-utils – for reading/writing flash partitions from Linux
+BR2_PACKAGE_MTD=y
+BR2_PACKAGE_MTD_MKFS_JFFS2=y
+
+# USB utilities (lsusb, usb_modeswitch – helpful once USB host is active)
+BR2_PACKAGE_USBUTILS=y
+
+# iproute2 – ip link, ip addr
+BR2_PACKAGE_IPROUTE2=y
+
+# wpa_supplicant – WiFi (via esp-hosted kernel SPI interface)
+BR2_PACKAGE_WPA_SUPPLICANT=y
+BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y

@@ -1,0 +1,71 @@
+#!/bin/sh
+# S10display – initialise the framebuffer display
+#
+# By the time this runs, the LCD_CAM peripheral has already been configured
+# by the lcd-init ESP-IDF application (pre-Linux stage).  The kernel has
+# registered /dev/fb0 via the simple-framebuffer DT node.
+#
+# This script:
+#   1. Verifies /dev/fb0 is present and shows its geometry.
+#   2. Clears the framebuffer to black.
+#   3. Enables the backlight (GPIO21).
+#   4. Redirects the virtual console to the framebuffer.
+
+case "$1" in
+start)
+    echo -n "Starting display... "
+
+    # Wait up to 3 s for fb0 to appear (module may be loading)
+    for i in 1 2 3 4 5 6; do
+        [ -e /dev/fb0 ] && break
+        sleep 0.5
+    done
+
+    if [ ! -e /dev/fb0 ]; then
+        echo "FAIL: /dev/fb0 not found"
+        exit 1
+    fi
+
+    # Show framebuffer info (fbset from BR2_PACKAGE_FBSET)
+    fbset -fb /dev/fb0 2>/dev/null && true
+
+    # Clear screen to black (write zeros to the full framebuffer)
+    # 800 * 480 * 2 bytes = 768000
+    dd if=/dev/zero of=/dev/fb0 bs=768000 count=1 2>/dev/null || true
+
+    # Enable backlight via GPIO sysfs (GPIO21)
+    BL_GPIO=21
+    if [ -d /sys/class/gpio ]; then
+        echo "$BL_GPIO" > /sys/class/gpio/export 2>/dev/null || true
+        echo out        > /sys/class/gpio/gpio${BL_GPIO}/direction 2>/dev/null || true
+        echo 1          > /sys/class/gpio/gpio${BL_GPIO}/value     2>/dev/null || true
+    fi
+
+    # Switch virtual console 1 to the framebuffer
+    if [ -e /dev/tty1 ] && [ -e /proc/sys/kernel/printk ]; then
+        # Direct kernel messages to console to avoid polluting fb0
+        echo 3 > /proc/sys/kernel/printk || true
+    fi
+
+    echo "OK"
+    ;;
+
+stop)
+    # Blank the screen on shutdown
+    if [ -e /dev/fb0 ]; then
+        dd if=/dev/zero of=/dev/fb0 bs=768000 count=1 2>/dev/null || true
+    fi
+    ;;
+
+restart|reload)
+    "$0" stop
+    "$0" start
+    ;;
+
+*)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+    ;;
+esac
+
+exit 0

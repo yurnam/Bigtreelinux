@@ -168,12 +168,56 @@ keep_etc=y
 
 For clean the working directories, please enter to `esp32-linux-build` and remove the build directory and rebuild with the settings with empty parameters.
 
+# BigTreeTech PandaTouch support
+
+The PandaTouch is an ESP32-S3 based 7″ 800×480 touchscreen device.
+Full Linux support (framebuffer display, GT911 touch, USB OTG) has been
+added to this repository.
+
+## Quick start for PandaTouch
+
+```bash
+# 1. Build the Docker image (from esp32s3-linux/)
+docker build --build-arg DOCKER_USER=$USER --build-arg DOCKER_USERID=$UID -t esp32linuxbase .
+
+# 2. Copy settings
+cp settings.cfg.default settings.cfg
+
+# 3. Build Linux with PandaTouch framebuffer + touch support
+docker run --rm -it --name pandatouch-linux \
+    --user="$(id -u):$(id -g)" \
+    -v ./esp32-linux-build:/app \
+    --env-file settings.cfg \
+    --device=/dev/ttyACM0 \
+    esp32linuxbase \
+    ./rebuild-esp32s3-pandatouch.sh
+
+# 4. Build and flash the LCD pre-loader (requires ESP-IDF v5)
+cd lcd-init && idf.py set-target esp32s3 && idf.py -p /dev/ttyACM0 flash
+```
+
+See the full guide: **[docs/PANDATOUCH_LINUX.md](docs/PANDATOUCH_LINUX.md)**
+
+### What was added
+
+| File | Purpose |
+|---|---|
+| `pandatouch.conf` | Selects `esp32s3_pandatouch` buildroot config |
+| `esp32s3-pandatouch.dts` | Linux device tree (LCD framebuffer, GT911, USB OTG) |
+| `esp32-linux-build/rebuild-esp32s3-pandatouch.sh` | PandaTouch build script |
+| `br2-external/` | Buildroot external tree (defconfig, kernel fragment, rootfs overlay) |
+| `lcd-init/` | ESP-IDF app that initialises the RGB LCD before Linux boots |
+| `docs/PANDATOUCH_LINUX.md` | Full build, flash, and bring-up guide |
+
+---
+
 # TODO
 
 - [x] Migrate to the last script version with build parameters
 - [x] Freezing repositories to specific commit
 - [x] Add provisioning stuff (etc partition)
 - [x] Improve the flashing step. Fix issue #10
+- [x] Add BigTreeTech PandaTouch Linux support (framebuffer, touch, USB)
 
 # Credits
 

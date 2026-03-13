@@ -1,0 +1,46 @@
+# sdkconfig.defaults – BigTreeTech PandaTouch lcd-init application
+#
+# Applied via:  idf.py set-target esp32s3 && idf.py build
+#
+# Target: ESP32-S3, 8 MB QIO Flash, 8 MB Octal PSRAM (OPI mode)
+
+# ── Target chip ───────────────────────────────────────────────────────────
+CONFIG_IDF_TARGET="esp32s3"
+
+# ── Flash ─────────────────────────────────────────────────────────────────
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+
+# ── PSRAM ─────────────────────────────────────────────────────────────────
+# Enable Octal SPI PSRAM (8 MB) at 80 MHz
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+# Allow malloc() to fall back to PSRAM when internal heap is full
+CONFIG_SPIRAM_USE_MALLOC=y
+
+# ── CPU speed ─────────────────────────────────────────────────────────────
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# ── Bootloader log ────────────────────────────────────────────────────────
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+
+# ── Application log ───────────────────────────────────────────────────────
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# ── UART console ──────────────────────────────────────────────────────────
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_NUM=0
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+
+# ── Partition table ───────────────────────────────────────────────────────
+# Use the custom partitions.csv in this directory
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# ── FreeRTOS ──────────────────────────────────────────────────────────────
+# Minimal tick rate – lcd-init exits quickly so tick rate doesn't matter much
+CONFIG_FREERTOS_HZ=100

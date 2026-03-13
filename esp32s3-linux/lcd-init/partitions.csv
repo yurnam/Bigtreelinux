@@ -1,0 +1,38 @@
+# partitions.csv – PandaTouch 8 MB flash layout
+#
+# ─────────────────────────────────────────────────────────────────────────
+# IMPORTANT: the linux partition MUST start at 0x120000.
+#
+# The jcmvbkbc esp-hosted network_adapter firmware reports:
+#   "linux ptr = 0x42120000"
+# 0x42120000 is the XIP cache address for flash offset 0x120000
+# (ESP32-S3 flash XIP base = 0x42000000).
+#
+# Both this file AND sdkconfig.pandatouch.defaults must agree on the
+# layout so that idf.py flash and parttool.py use the same offsets.
+# ─────────────────────────────────────────────────────────────────────────
+#
+# Partition name   Type    SubType   Offset    Size      Notes
+# ─────────────────────────────────────────────────────────────────────────
+# nvs              data    nvs       0x009000  0x004000  WiFi/NVS KV store
+# otadata          data    ota       0x00D000  0x002000  OTA state
+# phy_init         data    phy       0x00F000  0x001000  RF calibration
+# bootloader_app   app     factory   0x010000  0x110000  esp-hosted Linux loader
+#                                                         (1 MB + 64 KB gives
+#                                                          linux the 0x120000 start)
+# linux            app     ota_0     0x120000  0x270000  xipImage (2.4375 MB)
+# rootfs           data    0x40      0x390000  0x280000  cramfs rootfs (2.5 MB)
+# etc              data    0x41      0x610000  0x080000  jffs2 /etc (512 KB)
+# reserved         data    0x42      0x690000  0x170000  future use (~1.4 MB)
+#
+# Total: 0x690000 + 0x170000 = 0x800000 = 8 MB ✓
+
+# name,           type,  subtype,  offset,    size,
+nvs,              data,  nvs,      0x9000,    0x4000,
+otadata,          data,  ota,      0xd000,    0x2000,
+phy_init,         data,  phy,      0xf000,    0x1000,
+bootloader_app,   app,   factory,  0x10000,   0x110000,
+linux,            app,   ota_0,    0x120000,  0x270000,
+rootfs,           data,  0x40,     0x390000,  0x280000,
+etc,              data,  0x41,     0x610000,  0x80000,
+reserved,         data,  0x42,     0x690000,  0x170000,

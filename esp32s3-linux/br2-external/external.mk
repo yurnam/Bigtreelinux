@@ -43,24 +43,32 @@
 # Buildroot includes $(BR2_EXTERNAL_MKS) AFTER all package/*/*.mk files, so
 # this definition replaces the fork's ifeq/else version.
 #
-# Fix (this file – condition B, primary)
-# ----------------------------------------
-# BUSYBOX_CFLAGS is defined in busybox.mk with deferred assignment (=), so
-# appending here (external.mk is included AFTER all package/*.mk files) adds
-# -D__ARCH_USE_MMU__ to the CFLAGS that Buildroot passes on the make command
-# line when building BusyBox.  This is more reliable than the CONFIG_EXTRA_CFLAGS
-# Kconfig fragment approach because it bypasses Kconfig/syncconfig entirely.
-# Result: __ARCH_USE_MMU__ is defined for all BusyBox compilation units →
-# platform.h second condition evaluates FALSE → BB_MMU=1 → ash compiles.
+# Fix (this file – condition B, definitive)
+# ------------------------------------------
+# BusyBox's kbuild uses KBUILD_CFLAGS internally, not the generic CFLAGS
+# make variable, so the BUSYBOX_CFLAGS += approach does not reach individual
+# compilation units.  CONFIG_EXTRA_CFLAGS (in the kconfig fragment) is also
+# unreliable: it can be reset by olddefconfig or the kconfig-fixup step.
 #
-# Fix (busybox-mmu.config – condition B, belt-and-suspenders)
-# -------------------------------------------------------------
-# busybox-mmu.config also sets CONFIG_EXTRA_CFLAGS="-D__ARCH_USE_MMU__".
-# BusyBox's Makefile.flags appends CONFIG_EXTRA_CFLAGS to CFLAGS at build time.
-# This provides a secondary path in case BUSYBOX_CFLAGS += ever stops applying.
+# The only guaranteed approach is to patch platform.h at source level via
+# BUSYBOX_POST_PATCH_HOOKS, which runs on the extracted source tree before
+# any compilation.  The patch adds "!defined __xtensa__" to the uClibc
+# BB_MMU=0 condition so that the condition reads:
+#
+#   (defined __UCLIBC__ && UCLIBC_VERSION > ... &&
+#    !defined __ARCH_USE_MMU__ && !defined __xtensa__)
+#
+# Because GCC defines __xtensa__ for all Xtensa targets, the parenthesised
+# expression evaluates to FALSE → BB_MMU stays 1 → ash compiles.
+# This is semantically correct: the Xtensa ESP32-S3 has a hardware MMU, so
+# BB_MMU must never be forced to 0 by the uClibc-fdpic path.
 #
 define BUSYBOX_SET_MMU
 	$(call KCONFIG_DISABLE_OPT,CONFIG_NOMMU)
 endef
 
-BUSYBOX_CFLAGS += -D__ARCH_USE_MMU__
+define BUSYBOX_XTENSA_MMU_FIX
+	$(SED) 's/!defined __ARCH_USE_MMU__/!defined __ARCH_USE_MMU__ \&\& !defined __xtensa__/' \
+		$(BUSYBOX_DIR)/include/platform.h
+endef
+BUSYBOX_POST_PATCH_HOOKS += BUSYBOX_XTENSA_MMU_FIX

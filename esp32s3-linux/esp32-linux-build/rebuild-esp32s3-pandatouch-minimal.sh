@@ -159,23 +159,19 @@ else
 fi
 
 # ── BusyBox MMU fix ────────────────────────────────────────────────────────
-# Three complementary fixes ensure ash compiles (BB_MMU=1) on ESP32-S3:
+# Two fixes ensure ash compiles (BB_MMU=1) on ESP32-S3:
 #
 # 1. br2-external/external.mk overrides BUSYBOX_SET_MMU to disable CONFIG_NOMMU
 #    (prevents ENABLE_NOMMU=1 which is the first condition for BB_MMU=0).
 #
-# 2. br2-external/external.mk appends BUSYBOX_CFLAGS += -D__ARCH_USE_MMU__
-#    (PRIMARY fix for BB_MMU=0 from the uClibc condition).
-#    BUSYBOX_CFLAGS is a deferred Make variable; the append runs after
-#    busybox.mk is loaded, and passes -D__ARCH_USE_MMU__ to all BusyBox
-#    compilation units via Buildroot's CFLAGS="..." make invocation.
-#    This bypasses Kconfig/syncconfig entirely.
+# 2. br2-external/external.mk registers a BUSYBOX_POST_PATCH_HOOKS function
+#    that sed-patches BusyBox's include/platform.h to add "!defined __xtensa__"
+#    to the uClibc BB_MMU=0 condition.  GCC always defines __xtensa__ for
+#    Xtensa targets, so the parenthesised condition evaluates to FALSE and
+#    BB_MMU stays 1.  This is a source-level fix: it runs before compilation
+#    and is independent of CFLAGS forwarding or Kconfig/syncconfig.
 #
-# 3. busybox-mmu.config adds CONFIG_EXTRA_CFLAGS="-D__ARCH_USE_MMU__"
-#    (belt-and-suspenders via BusyBox's Makefile.flags CONFIG_EXTRA_CFLAGS
-#    mechanism – a secondary path for the same define).
-#
-# 4. BR2_USE_MMU=y is passed on the make command line so the ifeq guard in
+# 3. BR2_USE_MMU=y is passed on the make command line so the ifeq guard in
 #    busybox.mk takes the MMU branch unconditionally.
 
 if [ ! -d "build-buildroot-$BUILDROOT_CONFIG" ] || \
@@ -200,9 +196,11 @@ if [ ! -d "build-buildroot-$BUILDROOT_CONFIG" ] || \
         --set-str TOOLCHAIN_EXTERNAL_CUSTOM_PREFIX \
         '$(ARCH)-esp32s3-linux-uclibcfdpic'
 
-    # Force BusyBox reconfigure: any stale stamps from a previous failed
-    # build prevent re-running the kconfig fixup and compile.
-    rm -f "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_kconfig_fixup_done \
+    # Force BusyBox re-patch + reconfigure: stale stamps from a previous failed
+    # build prevent re-running the post-patch hook (platform.h fix), the kconfig
+    # fixup, and the compile.
+    rm -f "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_patched \
+          "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_kconfig_fixup_done \
           "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_configured \
           "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_built
 fi

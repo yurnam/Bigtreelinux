@@ -43,12 +43,24 @@
 # Buildroot includes $(BR2_EXTERNAL_MKS) AFTER all package/*/*.mk files, so
 # this definition replaces the fork's ifeq/else version.
 #
-# Fix (busybox-mmu.config – condition B)
-# ---------------------------------------
-# busybox-mmu.config adds CONFIG_EXTRA_CFLAGS="-D__ARCH_USE_MMU__".  BusyBox's
-# Makefile.flags appends this to CFLAGS at compile time, defining __ARCH_USE_MMU__
-# and making the second condition evaluate FALSE → BB_MMU=1.
+# Fix (this file – condition B, primary)
+# ----------------------------------------
+# BUSYBOX_CFLAGS is defined in busybox.mk with deferred assignment (=), so
+# appending here (external.mk is included AFTER all package/*.mk files) adds
+# -D__ARCH_USE_MMU__ to the CFLAGS that Buildroot passes on the make command
+# line when building BusyBox.  This is more reliable than the CONFIG_EXTRA_CFLAGS
+# Kconfig fragment approach because it bypasses Kconfig/syncconfig entirely.
+# Result: __ARCH_USE_MMU__ is defined for all BusyBox compilation units →
+# platform.h second condition evaluates FALSE → BB_MMU=1 → ash compiles.
+#
+# Fix (busybox-mmu.config – condition B, belt-and-suspenders)
+# -------------------------------------------------------------
+# busybox-mmu.config also sets CONFIG_EXTRA_CFLAGS="-D__ARCH_USE_MMU__".
+# BusyBox's Makefile.flags appends CONFIG_EXTRA_CFLAGS to CFLAGS at build time.
+# This provides a secondary path in case BUSYBOX_CFLAGS += ever stops applying.
 #
 define BUSYBOX_SET_MMU
 	$(call KCONFIG_DISABLE_OPT,CONFIG_NOMMU)
 endef
+
+BUSYBOX_CFLAGS += -D__ARCH_USE_MMU__

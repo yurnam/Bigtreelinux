@@ -159,22 +159,11 @@ else
     pushd buildroot; git pull; popd
 fi
 
-# ── Patch Buildroot's busybox.mk for Xtensa-MMU targets ──────────────────
-# busybox.mk's BUSYBOX_KCONFIG_FIXUP_CMDS contains:
-#   $(if $(BR2_USE_MMU),,$(call KCONFIG_DISABLE_OPT,CONFIG_MMU))
-# In the jcmvbkbc xtensa-fdpic fork, Buildroot's syncconfig strips
-# BR2_USE_MMU from auto.conf, so this condition ALWAYS fires and disables
-# CONFIG_MMU — overriding the busybox-mmu.config fragment's CONFIG_MMU=y
-# and causing ash to fail:
-#   shell/ash.c: #error "Do not even bother, ash will not run on NOMMU machine"
-# Fix: delete the KCONFIG_DISABLE_OPT line entirely.  The busybox-mmu.config
-# fragment already guarantees CONFIG_MMU=y; we just need to stop FIXUP_CMDS
-# from overriding it.  This sed is idempotent.
-if grep -q 'KCONFIG_DISABLE_OPT.*CONFIG_MMU' buildroot/package/busybox/busybox.mk 2>/dev/null; then
-    sed -i '/KCONFIG_DISABLE_OPT.*CONFIG_MMU/d' \
-        buildroot/package/busybox/busybox.mk \
-        || die "Failed to patch buildroot/package/busybox/busybox.mk"
-fi
+# ── BusyBox MMU fix ────────────────────────────────────────────────────────
+# The real fix is in br2-external/external.mk: BUSYBOX_SET_MMU is redefined
+# there to unconditionally disable CONFIG_NOMMU (MMU path), overriding the
+# jcmvbkbc fork's broken ifeq ($(BR2_USE_MMU),y) guard.
+# See br2-external/external.mk for the full root-cause explanation.
 
 if [ ! -d "build-buildroot-$BUILDROOT_CONFIG" ] || \
    [ ! -f "build-buildroot-$BUILDROOT_CONFIG/images/xipImage" ] ; then
@@ -197,10 +186,9 @@ if [ ! -d "build-buildroot-$BUILDROOT_CONFIG" ] || \
         --set-str TOOLCHAIN_EXTERNAL_CUSTOM_PREFIX \
         '$(ARCH)-esp32s3-linux-uclibcfdpic'
 
-    # Force BusyBox reconfigure: stamps may exist from a previous
-    # failed build where CONFIG_MMU was disabled.  Deleting these stamps
-    # ensures Buildroot re-runs the kconfig fixup and configure steps
-    # so CONFIG_MMU=y from busybox-mmu.config is properly applied.
+    # Force BusyBox reconfigure: any stale stamps from a previous failed
+    # build (where CONFIG_NOMMU may have been set) prevent re-running the
+    # kconfig fixup.  Delete them so Buildroot reruns the fixup and compile.
     rm -f "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_kconfig_fixup_done \
           "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_configured \
           "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_built

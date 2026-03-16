@@ -30,8 +30,9 @@ BR2_XTENSA_LITTLE_ENDIAN=y
 BR2_XTENSA_USE_MMU=y
 # Explicitly set BR2_USE_MMU so busybox.mk's BUSYBOX_CONFIG_FIXUPS enables
 # CONFIG_MMU instead of disabling it.  In the jcmvbkbc xtensa-fdpic fork the
-# BR2_XTENSA_USE_MMU → select BR2_USE_MMU chain is broken.
-BR2_USE_MMU=y
+# BR2_XTENSA_USE_MMU → select BR2_USE_MMU chain is broken in the jcmvbkbc
+# fork; the line below may be silently dropped by Kconfig (computed symbol).
+# The actual fix is in br2-external/external.mk (BUSYBOX_SET_MMU override).
 
 # ── Toolchain ─────────────────────────────────────────────────────────────
 BR2_TOOLCHAIN_EXTERNAL=y

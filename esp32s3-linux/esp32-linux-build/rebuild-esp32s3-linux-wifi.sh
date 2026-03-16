@@ -101,24 +101,12 @@ else
 	popd
 fi
 
-#
-# Patch Buildroot's busybox.mk for Xtensa-MMU targets
-#
-# busybox.mk's BUSYBOX_KCONFIG_FIXUP_CMDS contains:
-#   $(if $(BR2_USE_MMU),,$(call KCONFIG_DISABLE_OPT,CONFIG_MMU))
-# In the jcmvbkbc xtensa-fdpic fork, Buildroot's syncconfig strips
-# BR2_USE_MMU from auto.conf, so this condition ALWAYS fires and disables
-# CONFIG_MMU — overriding the busybox-mmu.config fragment's CONFIG_MMU=y
-# and causing ash to fail:
-#   shell/ash.c: #error "Do not even bother, ash will not run on NOMMU machine"
-# Fix: delete the KCONFIG_DISABLE_OPT line entirely.  The busybox-mmu.config
-# fragment already guarantees CONFIG_MMU=y; we just need to stop FIXUP_CMDS
-# from overriding it.  This sed is idempotent.
-if grep -q 'KCONFIG_DISABLE_OPT.*CONFIG_MMU' buildroot/package/busybox/busybox.mk 2>/dev/null; then
-	sed -i '/KCONFIG_DISABLE_OPT.*CONFIG_MMU/d' \
-		buildroot/package/busybox/busybox.mk \
-		|| die "Failed to patch buildroot/package/busybox/busybox.mk"
-fi
+# BusyBox MMU fix: pass BR2_USE_MMU=y to make so that BUSYBOX_SET_MMU in
+# busybox.mk takes the MMU branch (disables CONFIG_NOMMU) instead of the NOMMU
+# branch (which enables CONFIG_NOMMU, sets BB_MMU=0, and breaks ash).
+# The jcmvbkbc fork's Config.in does not propagate BR2_XTENSA_USE_MMU →
+# BR2_USE_MMU into Make, so we supply it on the command line.
+# See br2-external/external.mk for the full root-cause explanation.
 
 if [ ! -d build-buildroot-$BUILDROOT_CONFIG ] ; then
 	nice make -C buildroot O=`pwd`/build-buildroot-$BUILDROOT_CONFIG ${BUILDROOT_CONFIG}_defconfig || die "Could not apply buildroot config ${BUILDROOT_CONFIG}_defconfig"
@@ -126,7 +114,7 @@ if [ ! -d build-buildroot-$BUILDROOT_CONFIG ] ; then
 	buildroot/utils/config --file build-buildroot-$BUILDROOT_CONFIG/.config --set-str TOOLCHAIN_EXTERNAL_PREFIX '$(ARCH)-esp32s3-linux-uclibcfdpic'
 	buildroot/utils/config --file build-buildroot-$BUILDROOT_CONFIG/.config --set-str TOOLCHAIN_EXTERNAL_CUSTOM_PREFIX '$(ARCH)-esp32s3-linux-uclibcfdpic'
 fi
-nice make -C buildroot O=`pwd`/build-buildroot-$BUILDROOT_CONFIG
+nice make -C buildroot O=`pwd`/build-buildroot-$BUILDROOT_CONFIG BR2_USE_MMU=y
 [ -f build-buildroot-$BUILDROOT_CONFIG/images/xipImage -a -f build-buildroot-$BUILDROOT_CONFIG/images/rootfs.cramfs -a -f build-buildroot-$BUILDROOT_CONFIG/images/etc.jffs2 ] || exit 1
 
 #

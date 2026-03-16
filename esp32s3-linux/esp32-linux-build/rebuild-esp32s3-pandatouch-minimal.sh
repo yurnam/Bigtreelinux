@@ -159,16 +159,24 @@ else
 fi
 
 # ── BusyBox MMU fix ────────────────────────────────────────────────────────
-# The real fix is in br2-external/external.mk: BUSYBOX_SET_MMU is redefined
-# there to unconditionally disable CONFIG_NOMMU (MMU path), overriding the
-# jcmvbkbc fork's broken ifeq ($(BR2_USE_MMU),y) guard.
-# See br2-external/external.mk for the full root-cause explanation.
+# Two complementary fixes are applied:
+#
+# 1. br2-external/external.mk overrides BUSYBOX_SET_MMU to disable CONFIG_NOMMU
+#    (prevents ENABLE_NOMMU=1 which is the first condition for BB_MMU=0).
+#
+# 2. busybox-mmu.config adds CONFIG_EXTRA_CFLAGS="-D__ARCH_USE_MMU__" which
+#    forces BB_MMU=1 regardless of the uClibc toolchain headers (the ESP32-S3
+#    uclibcfdpic toolchain does not define __ARCH_USE_MMU__ natively).
+#
+# 3. BR2_USE_MMU=y is passed on the make command line so the ifeq guard in
+#    busybox.mk takes the MMU branch unconditionally (belt-and-suspenders).
 
 if [ ! -d "build-buildroot-$BUILDROOT_CONFIG" ] || \
    [ ! -f "build-buildroot-$BUILDROOT_CONFIG/images/xipImage" ] ; then
     nice make -C buildroot \
         O="$(pwd)/build-buildroot-$BUILDROOT_CONFIG" \
         BR2_EXTERNAL="$BR2_EXTERNAL_DIR" \
+        BR2_USE_MMU=y \
         "${BUILDROOT_CONFIG}_defconfig" \
         || die "Could not apply buildroot config ${BUILDROOT_CONFIG}_defconfig"
 
@@ -186,8 +194,7 @@ if [ ! -d "build-buildroot-$BUILDROOT_CONFIG" ] || \
         '$(ARCH)-esp32s3-linux-uclibcfdpic'
 
     # Force BusyBox reconfigure: any stale stamps from a previous failed
-    # build (where CONFIG_NOMMU may have been set) prevent re-running the
-    # kconfig fixup.  Delete them so Buildroot reruns the fixup and compile.
+    # build prevent re-running the kconfig fixup and compile.
     rm -f "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_kconfig_fixup_done \
           "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_configured \
           "build-buildroot-$BUILDROOT_CONFIG"/build/busybox-*/.stamp_built
@@ -195,7 +202,8 @@ fi
 
 nice make -C buildroot \
     O="$(pwd)/build-buildroot-$BUILDROOT_CONFIG" \
-    BR2_EXTERNAL="$BR2_EXTERNAL_DIR"
+    BR2_EXTERNAL="$BR2_EXTERNAL_DIR" \
+    BR2_USE_MMU=y
 
 [ -f "build-buildroot-$BUILDROOT_CONFIG/images/xipImage"      ] || exit 1
 [ -f "build-buildroot-$BUILDROOT_CONFIG/images/rootfs.cramfs"  ] || exit 1

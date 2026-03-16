@@ -1,0 +1,19 @@
+# /etc/inittab – PandaTouch Linux
+#
+# Busybox init configuration.
+# Runs display init, then drops to a shell on the UART console.
+
+# Start the init scripts in /etc/init.d
+::sysinit:/etc/init.d/rcS
+
+# Framebuffer console on /dev/tty1 (requires fbcon driver)
+tty1::respawn:/sbin/getty -L tty1 0 vt100
+
+# UART0 serial console (primary debug port, TXD=GPIO43, RXD=GPIO44)
+console::respawn:/sbin/getty -L console 115200 vt100
+
+# Reboot / shutdown actions
+::restart:/sbin/init
+::ctrlaltdel:/sbin/reboot
+::shutdown:/bin/umount -a -r
+::shutdown:/sbin/swapoff -a

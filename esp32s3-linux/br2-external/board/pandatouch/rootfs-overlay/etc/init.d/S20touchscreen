@@ -1,0 +1,78 @@
+#!/bin/sh
+# S20touchscreen – initialise the GT911 capacitive touch controller
+#
+# The Goodix GT911 driver is enabled via CONFIG_TOUCHSCREEN_GOODIX and the
+# I²C device node is declared in esp32s3-pandatouch.dts.  By the time this
+# script runs the kernel has already probed the device and created the
+# input event node (usually /dev/input/event0).
+#
+# If tslib is installed (BR2_PACKAGE_TSLIB=y) we configure it so that
+# applications using libts get the correct screen resolution.
+
+TSLIB_CONF=/etc/ts.conf
+POINTERCAL=/etc/pointercal
+
+case "$1" in
+start)
+    echo -n "Starting touchscreen... "
+
+    # Locate the GT911 input device
+    TS_DEV=""
+    for evdev in /dev/input/event*; do
+        name=$(cat /sys/class/input/$(basename "$evdev")/device/name 2>/dev/null)
+        case "$name" in
+            *GT911*|*Goodix*|*goodix*)
+                TS_DEV="$evdev"
+                break
+                ;;
+        esac
+    done
+
+    if [ -z "$TS_DEV" ]; then
+        echo "GT911 input device not found (will retry at next boot)"
+        exit 0
+    fi
+
+    echo "found $TS_DEV"
+
+    # Configure tslib if available
+    if command -v ts_calibrate >/dev/null 2>&1; then
+        export TSLIB_TSDEVICE="$TS_DEV"
+        export TSLIB_FBDEVICE=/dev/fb0
+        export TSLIB_PLUGINDIR=/usr/lib/ts
+        export TSLIB_CONFFILE="$TSLIB_CONF"
+
+        # Write a default ts.conf if it does not exist
+        if [ ! -f "$TSLIB_CONF" ]; then
+            cat > "$TSLIB_CONF" <<EOF
+module_raw input
+module pthres pmin=1
+module dejitter delta=100
+module linear
+EOF
+        fi
+
+        # Write a default calibration file if none exists
+        # Values are: xscale, xtrans, yscale, ytrans, xyswap
+        # These defaults assume the panel is not rotated.
+        if [ ! -f "$POINTERCAL" ]; then
+            echo "65536 0 0 0 65536 0 65536" > "$POINTERCAL"
+        fi
+    fi
+    ;;
+
+stop)
+    ;;
+
+restart|reload)
+    "$0" stop
+    "$0" start
+    ;;
+
+*)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+    ;;
+esac
+
+exit 0

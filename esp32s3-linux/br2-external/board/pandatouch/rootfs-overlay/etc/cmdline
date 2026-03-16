@@ -1,0 +1,17 @@
+# /etc/cmdline – Linux kernel command line for PandaTouch
+#
+# This file is read by the esp-hosted bootloader and passed to the kernel.
+# Edit this file and reboot to change kernel options without reflashing.
+#
+# Key options explained:
+#   console=ttyS0,115200n8      – UART0 (GPIO43/44 via CH340K USB-C)
+#   root=mtd:rootfs             – cramfs rootfs from SPI-NOR "rootfs" partition
+#   fbcon=map:0                 – bind virtual console to /dev/fb0
+#   loglevel=7                  – verbose kernel log (reduce to 4 in production)
+#
+# To switch to USB serial console (USB-C native, after flashing):
+#   earlycon=esp32s3acm,mmio32,0x60038000 console=ttyACM1 root=mtd:rootfs rootfstype=cramfs ro fbcon=map:0
+#
+# To use a USB thumb drive as root (after confirming USB host works):
+#   console=ttyS0,115200n8 root=/dev/sda1 rootfstype=ext4 rw rootwait fbcon=map:0
+console=ttyS0,115200n8 earlycon=esp32uart,mmio32,0x60000000 root=mtd:rootfs rootfstype=cramfs ro loglevel=7 fbcon=map:0

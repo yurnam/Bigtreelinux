@@ -76,13 +76,21 @@ else
 	git pull
 	popd
 fi
+
+# BusyBox MMU fix: pass BR2_USE_MMU=y to make so that BUSYBOX_SET_MMU in
+# busybox.mk takes the MMU branch (disables CONFIG_NOMMU) instead of the NOMMU
+# branch (which enables CONFIG_NOMMU, sets BB_MMU=0, and breaks ash).
+# The jcmvbkbc fork's Config.in does not propagate BR2_XTENSA_USE_MMU →
+# BR2_USE_MMU into Make, so we supply it on the command line.
+# See br2-external/external.mk for the full root-cause explanation.
+
 if [ ! -d build-buildroot-esp32 ] ; then
-	nice make -C buildroot O=`pwd`/build-buildroot-esp32 $BUILDROOT_CONFIG
+	nice make -C buildroot O=`pwd`/build-buildroot-esp32 BR2_USE_MMU=y $BUILDROOT_CONFIG
 	buildroot/utils/config --file build-buildroot-esp32/.config --set-str TOOLCHAIN_EXTERNAL_PATH `pwd`/crosstool-NG/builds/xtensa-esp32-linux-uclibcfdpic
 	buildroot/utils/config --file build-buildroot-esp32/.config --set-str TOOLCHAIN_EXTERNAL_PREFIX '$(ARCH)-esp32-linux-uclibcfdpic'
 	buildroot/utils/config --file build-buildroot-esp32/.config --set-str TOOLCHAIN_EXTERNAL_CUSTOM_PREFIX '$(ARCH)-esp32-linux-uclibcfdpic'
 fi
-nice make -C buildroot O=`pwd`/build-buildroot-esp32
+nice make -C buildroot O=`pwd`/build-buildroot-esp32 BR2_USE_MMU=y
 [ -f build-buildroot-esp32/images/xipImage -a -f build-buildroot-esp32/images/rootfs.cramfs -a -f build-buildroot-esp32/images/etc.jffs2 ] || exit 1
 
 #

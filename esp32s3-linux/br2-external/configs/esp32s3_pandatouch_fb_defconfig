@@ -1,0 +1,85 @@
+# Buildroot defconfig for BigTreeTech PandaTouch – minimal + framebuffer
+#
+# USE THIS CONFIG with build-minimal.sh for a fast bring-up image that
+# includes the LCD framebuffer but skips the heavy networking packages.
+#
+# Compared to esp32s3_pandatouch_defconfig this removes:
+#   - wpa_supplicant (WiFi, largest package)
+#   - tslib / evtest (touch userspace)
+#   - iproute2 (networking tools)
+#   - mtd-utils (flash tools)
+#   - usbutils (lsusb)
+#   - devmem2 (MMIO debug)
+#
+# You still get:
+#   - Working framebuffer (/dev/fb0) via simple-framebuffer DT node
+#   - Backlight control, fbcon (text on LCD)
+#   - BusyBox init + shell
+#   - fbset to inspect/set display modes
+#   - Serial console (UART0, ttyS0, 115200 baud)
+#   - Writable /etc (jffs2)
+#
+# First build: ~60 min (same toolchain cost as full build).
+# Subsequent builds: ~5–10 min when run via build-minimal.sh
+# (incremental by default – toolchain and esp-hosted are not rebuilt).
+
+# ── Architecture ──────────────────────────────────────────────────────────
+BR2_xtensa=y
+BR2_XTENSA_DYNCONFIG=y
+BR2_XTENSA_LITTLE_ENDIAN=y
+BR2_XTENSA_USE_MMU=y
+# Try to set BR2_USE_MMU=y. This may be silently dropped by olddefconfig in
+# the jcmvbkbc fork (broken select chain). The definitive fix is three-part:
+# 1. br2-external/external.mk overrides BUSYBOX_SET_MMU (disables CONFIG_NOMMU)
+# 2. busybox-mmu.config adds CONFIG_EXTRA_CFLAGS="-D__ARCH_USE_MMU__" (forces BB_MMU=1)
+# 3. Build scripts pass BR2_USE_MMU=y on the make command line
+BR2_USE_MMU=y
+
+# ── Toolchain ─────────────────────────────────────────────────────────────
+BR2_TOOLCHAIN_EXTERNAL=y
+BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y
+BR2_TOOLCHAIN_EXTERNAL_PATH=""
+BR2_TOOLCHAIN_EXTERNAL_GCC_12=y
+BR2_TOOLCHAIN_EXTERNAL_HEADERS_6_6=y
+BR2_TOOLCHAIN_EXTERNAL_CUSTOM_UCLIBC=y
+BR2_TOOLCHAIN_EXTERNAL_WCHAR=y
+BR2_TOOLCHAIN_EXTERNAL_HAS_SSP=y
+BR2_TOOLCHAIN_EXTERNAL_CXX=y
+
+# ── Build options ─────────────────────────────────────────────────────────
+BR2_OPTIMIZE_S=y
+
+# ── Kernel ────────────────────────────────────────────────────────────────
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_GIT=y
+BR2_LINUX_KERNEL_CUSTOM_REPO_URL="https://github.com/jcmvbkbc/linux-xtensa.git"
+BR2_LINUX_KERNEL_CUSTOM_REPO_VERSION="xtensa-fdpic"
+BR2_LINUX_KERNEL_DEFCONFIG="esp32s3"
+# Config fragment: framebuffer, GT911 touch driver, USB host
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_PANDATOUCH_PATH)/board/pandatouch/linux-extras.config"
+# Device-tree: provides the simple-framebuffer node for /dev/fb0
+BR2_LINUX_KERNEL_DTS_SUPPORT=y
+BR2_LINUX_KERNEL_CUSTOM_DTS_PATH="$(BR2_EXTERNAL_PANDATOUCH_PATH)/board/pandatouch/esp32s3-pandatouch.dts"
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="esp32s3-pandatouch"
+BR2_LINUX_KERNEL_IMAGE_TARGET_NAME="xipImage"
+
+# ── System ────────────────────────────────────────────────────────────────
+BR2_TARGET_GENERIC_HOSTNAME="pandatouch"
+BR2_TARGET_GENERIC_ISSUE="BigTreeTech PandaTouch Linux (minimal+fb)"
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_PANDATOUCH_PATH)/board/pandatouch/rootfs-overlay"
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_PANDATOUCH_PATH)/board/pandatouch/post-build.sh"
+BR2_ROOTFS_POST_FAKEROOT_SCRIPT="$(BR2_EXTERNAL_PANDATOUCH_PATH)/board/pandatouch/mkfs-etc.sh"
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_PANDATOUCH_PATH)/board/pandatouch/post-image.sh"
+
+# ── Root filesystem ───────────────────────────────────────────────────────
+BR2_TARGET_ROOTFS_CRAMFS=y
+BR2_TARGET_ROOTFS_JFFS2=y
+BR2_TARGET_ROOTFS_JFFS2_FLASH_64=y
+
+# ── Packages ──────────────────────────────────────────────────────────────
+BR2_PACKAGE_BUSYBOX=y
+# Force CONFIG_MMU=y so ash compiles (ESP32-S3 has a hardware MMU).
+BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_PANDATOUCH_PATH)/board/pandatouch/busybox-mmu.config"
+
+# fbset: inspect and set framebuffer display modes
+BR2_PACKAGE_FBSET=y

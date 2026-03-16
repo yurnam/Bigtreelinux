@@ -35,11 +35,20 @@ popd
 # kernel and rootfs
 #
 git clone https://github.com/jcmvbkbc/buildroot -b xtensa-2023.02-fdpic
+
+#
+# BusyBox MMU fix: pass BR2_USE_MMU=y to make so that BUSYBOX_SET_MMU in
+# busybox.mk takes the MMU branch (disables CONFIG_NOMMU) instead of the NOMMU
+# branch (which enables CONFIG_NOMMU, sets BB_MMU=0, and breaks ash).
+# The jcmvbkbc fork's Config.in does not propagate BR2_XTENSA_USE_MMU →
+# BR2_USE_MMU into Make, so we supply it on the command line.
+# See br2-external/external.mk for the full root-cause explanation.
+
 nice make -C buildroot O=`pwd`/build-xtensa-2023.02-fdpic-esp32s3 esp32s3_defconfig
 buildroot/utils/config --file build-xtensa-2023.02-fdpic-esp32s3/.config --set-str TOOLCHAIN_EXTERNAL_PATH `pwd`/crosstool-NG/builds/xtensa-esp32s3-linux-uclibcfdpic
 buildroot/utils/config --file build-xtensa-2023.02-fdpic-esp32s3/.config --set-str TOOLCHAIN_EXTERNAL_PREFIX '$(ARCH)-esp32s3-linux-uclibcfdpic'
 buildroot/utils/config --file build-xtensa-2023.02-fdpic-esp32s3/.config --set-str TOOLCHAIN_EXTERNAL_CUSTOM_PREFIX '$(ARCH)-esp32s3-linux-uclibcfdpic'
-nice make -C buildroot O=`pwd`/build-xtensa-2023.02-fdpic-esp32s3
+nice make -C buildroot O=`pwd`/build-xtensa-2023.02-fdpic-esp32s3 BR2_USE_MMU=y
 [ -f build-xtensa-2023.02-fdpic-esp32s3/images/xipImage -a -f build-xtensa-2023.02-fdpic-esp32s3/images/rootfs.cramfs ] || exit 1
 
 #
